@@ -2180,6 +2180,7 @@ function closeSheet(fromPop){
 
 // ================= QUESTION SETS (a fresh set for each attempt) =================
 const EXAM_SIZE = 15;                 // questions per exam
+const MIN_SET = 10;                   // a set may be shortened to this rather than repeat a type a third time
 const _qidC = new WeakMap();
 const qid = q => { const c = _qidC.get(q); if(c) return c; let h = 5381; const s = q.q + "|" + q.opts.join("|"); for(let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; const r = h.toString(36); _qidC.set(q, r); return r; };
 const shuffle = a => { a = a.slice(); for(let i = a.length - 1; i > 0; i--){ const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -2192,47 +2193,69 @@ function shuffleOptions(q){
   const idx = shuffle(q.opts.map((_, i) => i));
   return {...q, opts: idx.map(i => q.opts[i]), ans: idx.indexOf(q.ans)};
 }
-// Two questions share a "pattern" when they start with the same words or end with the same words
-// (e.g. "The magnitude of 4î − 4ĵ − 7k̂ is:" and "The magnitude of î + 2ĵ − 2k̂ is:").
-// One exam never shows two questions of the same pattern, and the patterns used in the last two
-// sets of a chapter are held back where possible, so every question feels different.
-const _tplC = new WeakMap();
+// ---- One question of each TYPE per set ----
+// Two questions are the same type when they:
+//   · are the same template with different numbers ("The magnitude of 4î − 4ĵ − 7k̂ is" / "… of î + 2ĵ − 2k̂ is"),
+//   · come from the same fact table ("Deficiency of Vitamin A causes" / "Deficiency of Vitamin C causes"),
+//   · start with the same words (longer match for generic openings like "Which of the following"), or
+//   · are both Assertion–Reason (or both case-based).
+// A set never repeats a type while the chapter still has other types available.
+const _tplC = new WeakMap(), _tblId = new WeakMap(); let _tblN = 0;
+const tblId = o => { if(!_tblId.has(o)) _tblId.set(o, ++_tblN); return _tblId.get(o); };
 function tplKeys(q){
   let k = _tplC.get(q); if(k) return k;
   const w = String(q.q).replace(/<[^>]+>/g, " ").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(x => x.length > 1);
-  k = ["p:" + w.slice(0, 4).join(" "), "s:" + w.slice(-3).join(" ")]; _tplC.set(q, k); return k;
+  const generic = /^(which|what|choose|identify|select|according|consider|read|find|name|who|how|fill|pick)$/.test(w[0] || "");
+  k = [];
+  if(q.src) k.push("t" + tblId(q.src.t || q.src.y) + "." + q.src.m);           // same fact table
+  k.push("n:" + w.join(" "));                                                     // same template, only numbers differ
+  k.push("p:" + w.slice(0, generic ? 6 : 4).join(" "));                          // same opening words
+  if(/assertion\s*\(a\)/i.test(q.q) || q.type === "Assertion-Reason") k.push("AR");
+  if(q.type === "Case-based") k.push("CASE");
+  _tplC.set(q, k); return k;
 }
 const tplStoreKey = () => "atomiq_tpl_" + (state.user ? state.user.uid : "guest");
 function recentTpl(k){ try{ return new Set((JSON.parse(localStorage.getItem(tplStoreKey()) || "{}"))[k] || []); }catch(e){ return new Set(); } }
 function rememberTpl(k, qs){
   try{ const all = JSON.parse(localStorage.getItem(tplStoreKey()) || "{}"), keys = qs.flatMap(q => tplKeys(q));
-    all[k] = keys.concat((all[k] || []).filter(x => !keys.includes(x))).slice(0, 2 * EXAM_SIZE * 2);   // patterns from about the last two sets
+    all[k] = keys.concat((all[k] || []).filter(x => !keys.includes(x))).slice(0, EXAM_SIZE * 4 * 2);   // types from about the last two sets
     localStorage.setItem(tplStoreKey(), JSON.stringify(all)); }catch(e){}
+}
+// Same question in different words? Compare the key words (light stemming, "LPP" = "linear programming problem").
+const _cwC = new Map(), CW_STOP = new Set("the a an of to in on is are was were be been by for with as at and or which what who whose following these this that it its from into than then when if can will would should does do has have had called known always usually given each any all one two not no more most less least true false correct incorrect statement example type kind used use following".split(" "));
+function contentWords(q){
+  let w = _cwC.get(q.q); if(w) return w;
+  const t = String(q.q).replace(/<[^>]+>/g, " ").toLowerCase().replace(/\blpp\b/g, "linear programming problem").replace(/[^a-z\s]/g, " ");
+  w = new Set(t.split(/\s+/).filter(x => x.length > 2 && !CW_STOP.has(x)).map(x => x.replace(/(ised|ized|ising|izing|isation|ization)$/, "is").replace(/ies$/, "y").replace(/(es|s)$/, "")));
+  _cwC.set(q.q, w); return w;
+}
+function sameMeaning(a, b){
+  const A = contentWords(a), B = contentWords(b), m = Math.min(A.size, B.size); if(m < 3) return false;
+  let k = 0; A.forEach(x => { if(B.has(x)) k++; }); return k >= 3 && k / m >= 0.8;
 }
 function pickExamSet(subject, chapter){
   const k = seenKey(subject, chapter), pool = allQuestionsFor(subject, chapter).map(q => ({...q, id: qid(q)}));
   const order = new Map((state.seen[k] || []).map((id, i) => [id, i])), recent = recentTpl(k);
-  const fresh = shuffle(pool.filter(q => !order.has(q.id)));
-  const old = pool.filter(q => order.has(q.id)).sort((a, b) => order.get(a.id) - order.get(b.id));     // seen longest ago first
-  // Group new questions by pattern; one-of-a-kind questions form one group. Every set gets each group's fair
-  // share, so near-identical questions are spread thinly over all sets instead of piling up at the end.
-  const sets = Math.max(1, Math.ceil(fresh.length / EXAM_SIZE)), n = {};
-  fresh.forEach(q => { const p = tplKeys(q)[0]; n[p] = (n[p] || 0) + 1; });
+  const old = pool.filter(q => order.has(q.id)).sort((a, b) => order.get(a.id) - order.get(b.id));   // seen longest ago first
+  // New questions, grouped by their main type. Big groups go first and are dealt out one per set,
+  // so a type with many questions is spread over many sets instead of piling into one.
   const groups = new Map();
-  fresh.forEach(q => { const p = tplKeys(q)[0], g = n[p] > 1 ? p : "_one"; if(!groups.has(g)) groups.set(g, []); groups.get(g).push(q); });
-  groups.forEach(list => list.sort((a, b) => tplKeys(a).some(x => recent.has(x)) - tplKeys(b).some(x => recent.has(x))));   // patterns not used lately first
-  const share = new Map([...groups].map(([g, l]) => [g, l.length / sets])), took = new Map();
-  const pick = [], used = new Set();
-  while(pick.length < EXAM_SIZE){
-    let best = null, bd = -Infinity;
-    groups.forEach((l, g) => { if(!l.length) return; const d = share.get(g) - (took.get(g) || 0) + Math.random() * 1e-3; if(d > bd){ bd = d; best = g; } });
-    if(best === null) break;
-    const l = groups.get(best); let at = l.findIndex(q => !tplKeys(q).some(x => used.has(x))); if(at < 0) at = 0;
-    const q = l.splice(at, 1)[0]; pick.push(q); tplKeys(q).forEach(x => used.add(x)); took.set(best, (took.get(best) || 0) + 1);
-  }
-  // Only once every question in the chapter has been seen: the ones seen longest ago, different patterns first.
-  for(const strict of [true, false]) for(const q of old){ if(pick.length >= EXAM_SIZE) break; if(pick.includes(q)) continue;
-    if(strict && tplKeys(q).some(x => used.has(x))) continue; pick.push(q); tplKeys(q).forEach(x => used.add(x)); }
+  shuffle(pool.filter(q => !order.has(q.id))).forEach(q => { const g = tplKeys(q)[0]; if(!groups.has(g)) groups.set(g, []); groups.get(g).push(q); });
+  const fresh = [], lists = [...groups.values()].sort((a, b) => b.length - a.length || Math.random() - .5);
+  for(let r = 0; lists.some(l => l.length > r); r++) lists.forEach(l => { if(l[r]) fresh.push(l[r]); });
+  const sets = Math.max(1, Math.ceil(fresh.length / EXAM_SIZE)), big = new Set(lists.filter(l => l.length >= sets).map(l => tplKeys(l[0])[0]));
+  const pick = [], used = new Map(), taken = new Set();
+  const n = q => Math.max(...tplKeys(q).map(x => used.get(x) || 0));
+  const pass = (list, ok) => { for(const q of list){ if(pick.length >= EXAM_SIZE) return; if(taken.has(q.id) || !ok(q) || pick.some(p => sameMeaning(p, q) && tplKeys(p)[1] !== tplKeys(q)[1])) continue;
+    pick.push(q); taken.add(q.id); tplKeys(q).forEach(x => used.set(x, (used.get(x) || 0) + 1)); } };
+  pass(fresh, q => !n(q) && !tplKeys(q).some(x => recent.has(x) && !big.has(x)));   // new question, new type, not in the last sets
+  pass(fresh, q => !n(q));                                                         // new question, type not yet in this set
+  pass(fresh, q => n(q) < 2);                                                      // if a chapter is short of types: at most two of a type, still new questions
+  pass(old, q => !n(q));                                                           // then a question seen long ago, of a new type
+  pass(old, q => n(q) < 2);
+  // Small chapters without enough different types: a slightly shorter set (never below MIN_SET) beats a third question of one type.
+  if(pick.length < Math.min(MIN_SET, pool.length)){ pass(fresh, q => n(q) < 3); pass(old, q => n(q) < 3); }
+  if(pick.length < Math.min(MIN_SET, pool.length)){ pass(fresh, () => true); pass(old, () => true); }   // a very small chapter: fill up whatever exists
   rememberTpl(k, pick);
   return shuffle(pick).map(shuffleOptions);
 }
@@ -9595,8 +9618,12 @@ const normQ = q => String(q.q).replace(/<[^>]+>/g, "").toLowerCase().replace(/[\
 // ...and keep at most 15 questions that differ only in their numbers, so no chapter is mostly one template with new numbers.
 const numTpl = q => String(q.q).replace(/<[^>]+>/g, " ").toLowerCase().replace(/[^a-z]+/g, " ").trim();
 const MAX_PER_PATTERN = 15;
-function dedupeQs(arr){ const seen = new Set(), per = {}; let w = 0;
-  for(let r = 0; r < arr.length; r++){ const k = normQ(arr[r]), p = numTpl(arr[r]); if(seen.has(k) || (per[p] || 0) >= MAX_PER_PATTERN) continue; seen.add(k); per[p] = (per[p] || 0) + 1; arr[w++] = arr[r]; }
+// ...and no type may outnumber what the chapter's sets can spread out (about two per set), so sets stay varied.
+const TYPE_SHARE = 0;   // 0 = keep every question (variety is handled when a set is picked)
+function dedupeQs(arr){ const seen = new Set(), per = {}, typ = {}, cap = Math.max(5, Math.ceil(Math.ceil(arr.length / EXAM_SIZE) * TYPE_SHARE)); let w = 0;
+  for(let r = 0; r < arr.length; r++){ const q = arr[r], k = normQ(q), p = numTpl(q), ks = tplKeys(q);
+    if(seen.has(k) || (per[p] || 0) >= MAX_PER_PATTERN || (TYPE_SHARE && ks.some(x => (typ[x] || 0) >= cap))) continue;
+    seen.add(k); per[p] = (per[p] || 0) + 1; ks.forEach(x => typ[x] = (typ[x] || 0) + 1); arr[w++] = q; }
   arr.length = w; return arr; }
 
 // ================= DETAILED SOLUTIONS (shown on the results screen) =================
