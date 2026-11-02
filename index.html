@@ -2180,7 +2180,8 @@ function closeSheet(fromPop){
 
 // ================= QUESTION SETS (a fresh set for each attempt) =================
 const EXAM_SIZE = 15;                 // questions per exam
-const MIN_SET = 10;                   // a set may be shortened to this rather than repeat a type a third time
+const MIN_SET = 10;
+const DIFF_MIX = {Easy: 0.2, Medium: 0.47, Hard: 0.33};   // target share of each difficulty in every set                   // a set may be shortened to this rather than repeat a type a third time
 const _qidC = new WeakMap();
 const qid = q => { const c = _qidC.get(q); if(c) return c; let h = 5381; const s = q.q + "|" + q.opts.join("|"); for(let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; const r = h.toString(36); _qidC.set(q, r); return r; };
 const shuffle = a => { a = a.slice(); for(let i = a.length - 1; i > 0; i--){ const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -2246,13 +2247,23 @@ function pickExamSet(subject, chapter){
   const sets = Math.max(1, Math.ceil(fresh.length / EXAM_SIZE)), big = new Set(lists.filter(l => l.length >= sets).map(l => tplKeys(l[0])[0]));
   const pick = [], used = new Map(), taken = new Set();
   const n = q => Math.max(...tplKeys(q).map(x => used.get(x) || 0));
-  const pass = (list, ok) => { for(const q of list){ if(pick.length >= EXAM_SIZE) return; if(taken.has(q.id) || !ok(q) || pick.some(p => sameMeaning(p, q) && tplKeys(p)[1] !== tplKeys(q)[1])) continue;
-    pick.push(q); taken.add(q.id); tplKeys(q).forEach(x => used.set(x, (used.get(x) || 0) + 1)); } };
-  pass(fresh, q => !n(q) && !tplKeys(q).some(x => recent.has(x) && !big.has(x)));   // new question, new type, not in the last sets
-  pass(fresh, q => !n(q));                                                         // new question, type not yet in this set
-  pass(fresh, q => n(q) < 2);                                                      // if a chapter is short of types: at most two of a type, still new questions
-  pass(old, q => !n(q));                                                           // then a question seen long ago, of a new type
-  pass(old, q => n(q) < 2);
+  // Same difficulty mix in every set: about 20% Easy, 47% Medium, 33% Hard (3 / 7 / 5 in a set of 15).
+  // mode 0 = keep to the mix; 1 = more Medium/Hard is fine, but no extra Easy; 2 = anything (a chapter short of harder questions).
+  const want = {Easy: Math.round(EXAM_SIZE * DIFF_MIX.Easy), Medium: Math.round(EXAM_SIZE * DIFF_MIX.Medium), Hard: EXAM_SIZE - Math.round(EXAM_SIZE * DIFF_MIX.Easy) - Math.round(EXAM_SIZE * DIFF_MIX.Medium)}, dc = {Easy: 0, Medium: 0, Hard: 0};
+  // mode 3 = harder questions are fine and Easy may go up to one third of the set (when a chapter is short of harder questions).
+  const dOK = (q, mode) => mode === 2 || (mode === 1 || mode === 3 ? (q.diff !== "Easy" || dc.Easy < (mode === 1 ? want.Easy : Math.round(EXAM_SIZE / 3))) : (dc[q.diff] ?? 0) < (want[q.diff] ?? EXAM_SIZE));
+  const pass = (list, ok, mode = 2) => { for(const q of list){ if(pick.length >= EXAM_SIZE) return; if(taken.has(q.id) || !ok(q) || !dOK(q, mode) || pick.some(p => sameMeaning(p, q) && tplKeys(p)[1] !== tplKeys(q)[1])) continue;
+    pick.push(q); taken.add(q.id); dc[q.diff] = (dc[q.diff] || 0) + 1; tplKeys(q).forEach(x => used.set(x, (used.get(x) || 0) + 1)); } };
+  // Keep to the difficulty mix first (modes 0, 1); fall back to any difficulty (mode 2) only before reusing seen questions.
+  const freshPasses = mode => {
+    pass(fresh, q => !n(q) && !tplKeys(q).some(x => recent.has(x) && !big.has(x)), mode);   // new question, new type, not in the last sets
+    pass(fresh, q => !n(q), mode);                                                           // new question, type not yet in this set
+    pass(fresh, q => n(q) < 2, mode);                                                        // a chapter short of types: at most two of a type, still new questions
+  };
+  const oldPasses = mode => { pass(old, q => !n(q), mode); pass(old, q => n(q) < 2, mode); };   // a question seen long ago
+  freshPasses(0); freshPasses(1); freshPasses(3);   // new questions, keeping Easy to at most a third of the set
+  oldPasses(1); oldPasses(3);                       // a harder question seen long ago beats a sixth easy one
+  freshPasses(2); oldPasses(2);
   // Small chapters without enough different types: a slightly shorter set (never below MIN_SET) beats a third question of one type.
   if(pick.length < Math.min(MIN_SET, pool.length)){ pass(fresh, q => n(q) < 3); pass(old, q => n(q) < 3); }
   if(pick.length < Math.min(MIN_SET, pool.length)){ pass(fresh, () => true); pass(old, () => true); }   // a very small chapter: fill up whatever exists
@@ -4490,7 +4501,7 @@ Object.entries(C10_MORE).forEach(([s, chs]) => Object.entries(chs).forEach(([c, 
 // A fixed random seed keeps every question identical on every load, so "seen" progress keeps working.
 // Runs only when Class 10 is first opened (see syncClass), so Class 12 students never pay for it.
 let _c10Built = false;
-function buildC10Questions(){ if(_c10Built) return; _c10Built = true; try{ _buildC10(); } finally { Object.values(BANK10).forEach(v => Object.values(v.chapters).forEach(dedupeQs)); } }
+function buildC10Questions(){ if(_c10Built) return; _c10Built = true; try{ _buildC10(); } finally { try{ buildExtra("10"); }catch(e){ console.warn("Extra questions (Class 10) failed:", e); } Object.values(BANK10).forEach(v => Object.values(v.chapters).forEach(dedupeQs)); } }
 function _buildC10(){
 const G = {};                                   // subject -> chapter -> [questions]
 let seed = 1010;
@@ -9607,6 +9618,7 @@ const poly = (cs, vs) => { let s = "", f = true; cs.forEach((k, i) => { if(!k) r
 const B12 = CLASSES["12"].BANK;
 Object.entries(G).forEach(([s, chs]) => Object.entries(chs).forEach(([c, qs]) => { const ch = B12[s] && B12[s].chapters[c]; if(!ch){ console.warn("C12 generator: unknown chapter", s, c); return; }
   ch.push(...qs); dedupeQs(ch); }));
+try{ buildExtra("12"); }catch(e){ console.warn("Extra questions (Class 12) failed:", e); }
 Object.values(B12).forEach(v => Object.values(v.chapters).forEach(dedupeQs));
 // unused overrides would mean a question text changed
 const used = new Set(); Object.values(G).forEach(chs => Object.values(chs).forEach(qs => qs.forEach(q => used.add(q.q))));
@@ -9621,7 +9633,7 @@ const MAX_PER_PATTERN = 15;
 // ...and no type may outnumber what the chapter's sets can spread out (about two per set), so sets stay varied.
 const TYPE_SHARE = 0;   // 0 = keep every question (variety is handled when a set is picked)
 function dedupeQs(arr){ const seen = new Set(), per = {}, typ = {}, cap = Math.max(5, Math.ceil(Math.ceil(arr.length / EXAM_SIZE) * TYPE_SHARE)); let w = 0;
-  for(let r = 0; r < arr.length; r++){ const q = arr[r], k = normQ(q), p = numTpl(q), ks = tplKeys(q);
+  for(let r = 0; r < arr.length; r++){ const q = arr[r], k = normQ(q) + (q.detailedSolution ? "|" + q.opts.slice().sort().join("|") : ""), p = numTpl(q), ks = tplKeys(q);   // generic stems ("Which statement is incorrect?") differ by their options
     if(seen.has(k) || (per[p] || 0) >= MAX_PER_PATTERN || (TYPE_SHARE && ks.some(x => (typ[x] || 0) >= cap))) continue;
     seen.add(k); per[p] = (per[p] || 0) + 1; ks.forEach(x => typ[x] = (typ[x] || 0) + 1); arr[w++] = q; }
   arr.length = w; return arr; }
@@ -10031,6 +10043,943 @@ function queueMilestones(r, pct){
   fresh.forEach((k, i) => { const d = MILESTONES[k.startsWith("ch:") ? "chapter" : k];
     queueCelebration({kind: "ms", delay: i || _celebQ.length ? 0 : 2600, hero: `<div class="cel-trophy" aria-hidden="true"><span>${d.icon}</span></div>`, kicker: "Milestone unlocked",
       title: d.title, text: k.startsWith("ch:") ? `You've seen every question in <b>${esc(r.chapter)}</b>. New sets now start with the ones you saw longest ago.` : d.text}); });
+}
+
+
+// ================= MORE QUESTION TYPES: board-pattern Medium/Hard questions (NCERT pattern) =================
+// Added on top of the existing bank, with their own fixed random seed (so every question keeps the same id on
+// every load) and a worked solution on each question (detailedSolution: steps, why each wrong option is wrong, key rule).
+//  · buildExtra(cls) runs once per class, just before duplicates are removed.
+//  · Derived types use only facts the app already holds as verified question/answer pairs or fact tables:
+//      match-the-pair, NOT-correctly-matched, match the columns, which statement is incorrect/correct,
+//      which sentence is grammatically correct/incorrect (English).
+//  · Numerical templates (Maths, Physics, Chemistry, Science) compute every answer, and each wrong option is a
+//    typical slip whose reason is shown to the student.
+function buildExtra(cls){
+  const B = CLASSES[cls].BANK; let seed = cls === "12" ? 73100 : 51700;
+  const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const ri = (a, b) => a + Math.floor(rnd() * (b - a + 1)), pick = a => a[Math.floor(rnd() * a.length)];
+  const shuf = a => { a = a.slice(); for(let i = a.length - 1; i > 0; i--){ const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  const gcd = (a, b) => { a = Math.abs(a); b = Math.abs(b); while(b){ [a, b] = [b, a % b]; } return a; };
+  const M = n => n < 0 ? "−" + Math.abs(n) : String(n);
+  const num = (x, dp = 2) => { const r = Math.round(x * 10 ** dp) / 10 ** dp; return M(Object.is(r, -0) ? 0 : r); };
+  const frac = (p, q) => { if(q < 0){ p = -p; q = -q; } const g = gcd(p, q) || 1; p /= g; q /= g; return q === 1 ? M(p) : M(p) + "/" + q; };
+  const sup = n => String(n).replace(/-/g, "⁻").replace(/\d/g, k => "⁰¹²³⁴⁵⁶⁷⁸⁹"[k]);
+  const sci = (x, d = 2) => { if(x === 0) return "0"; const e = Math.floor(Math.log10(Math.abs(x))); if(e >= -2 && e <= 3) return num(x, e < 0 ? d - e : Math.max(d - e, 0) + (Math.abs(x) < 10 ? 1 : 0)); const m = x / 10 ** e; return (Math.abs(m - 1) < 1e-9 ? "" : num(m, d) + " × ") + "10" + sup(e); };
+  const seenQ = new Set(); let made = 0;
+  const has = (s, c) => B[s] && B[s].chapters[c];
+  // Q: add one question. wrong = [[optionText, whyItIsWrong], …]; steps = worked solution; rule = key rule.
+  function Q(s, c, diff, q, ok, wrong, steps, rule, tag, type){
+    if(!has(s, c)) return false;
+    ok = String(ok); const opts = [ok], why = {};
+    for(const w of wrong){ const v = String(w[0]); if(!v || /NaN|undefined|Infinity/.test(v) || opts.includes(v)) continue; opts.push(v); if(w[1]) why[v] = w[1]; if(opts.length === 4) break; }
+    if(opts.length < 4 || /NaN|undefined|Infinity/.test(q + ok + steps.join(""))) return false;
+    const key = s + "|" + c + "|" + q + "|" + opts.slice().sort().join("|"); if(seenQ.has(key)) return false; seenQ.add(key);
+    const o = shuf(opts);
+    B[s].chapters[c].push({q, opts: o, ans: o.indexOf(ok), diff, tag: tag || "NCERT pattern · " + (diff === "Hard" ? "Hard (3–5 marks)" : "Medium (2–3 marks)"), ...(type ? {type} : {}),
+      detailedSolution: {steps, wrong: why, rule: rule || ""}});
+    made++; return true;
+  }
+  // T: run a template generator up to n times (it returns {q, a, w, s, r} or null).
+  function T(s, c, diff, n, fn){ if(!has(s, c)) return; for(let i = 0, k = 0; i < n * 8 && k < n; i++){ const r = fn(); if(r && Q(s, c, diff, r.q, r.a, r.w, r.s, r.r, r.tag, r.type)) k++; } }
+
+  // ---------- derived: match the pair / NOT matched / match the columns ----------
+  const ROMAN = ["(i)", "(ii)", "(iii)", "(iv)"];
+  Object.entries(B).forEach(([s, v]) => Object.entries(v.chapters).forEach(([c, qs]) => {
+    const tables = new Map();
+    qs.forEach(q => { if(q.src && q.src.t && q.src.t.length >= 4){ if(!tables.has(q.src.t)) tables.set(q.src.t, []); tables.get(q.src.t).push(q); } });
+    tables.forEach((srcQs, rows) => {
+      rows = rows.filter(r => typeof r[0] === "string" && typeof r[1] === "string" && r[0].length < 60 && r[1].length < 90);
+      if(rows.length < 4) return;
+      // relation phrase from a source question, e.g. "Deficiency of … causes"
+      let rel = "";
+      for(const q of srcQs){ const row = q.src.t[q.src.i]; const txt = plainQ(q.q); const item = q.src.m === 1 ? row[0] : row[1];
+        if(txt.includes(item)){ rel = txt.replace(item, "…").replace(/[:?\s]+$/, ""); if(q.src.m === 2) rel = rel; break; } }
+      const relTxt = rel && rel.replace("…", "").trim().split(/\s+/).length >= 2 && rel.length <= 70 ? ` (${rel})` : "";
+      const truth = new Map(); rows.forEach(r => { if(!truth.has(r[0])) truth.set(r[0], new Set()); truth.get(r[0]).add(r[1]); });
+      const isTrue = (a, b) => truth.has(a) && truth.get(a).has(b);
+      const four = () => { const out = [], usedA = new Set(), usedB = new Set();
+        for(const r of shuf(rows)){ if(usedA.has(r[0]) || usedB.has(r[1])) continue; out.push(r); usedA.add(r[0]); usedB.add(r[1]); if(out.length === 4) break; }
+        return out.length === 4 ? out : null; };
+      const pr = (a, b) => `${a} — ${b}`;
+      const easyShare = qs.filter(q => q.diff === "Easy").length / qs.length;
+      for(let k = 0, K = easyShare > 0.3 ? 4 : 2; k < K; k++){
+        let f = four(); if(f){                     // one correct pair
+          const [r1, r2, r3, r4] = f, wrong = [[r2[0], r3[1]], [r3[0], r4[1]], [r4[0], r2[1]]].filter(([a, b]) => !isTrue(a, b));
+          if(wrong.length === 3) Q(s, c, "Medium", `Which of the following pairs is correctly matched?${relTxt}`, pr(r1[0], r1[1]),
+            wrong.map(([a, b]) => [pr(a, b), `${a} actually goes with ${[...truth.get(a)].join(" / ")}, not ${b}.`]),
+            [`Check each pair against the facts: ${f.map(r => pr(r[0], r[1])).join("; ")}.`, `Only “${pr(r1[0], r1[1])}” is matched correctly.`],
+            "Learn these as a set; examiners swap the partners to make the wrong options.", "Board pattern · Match the pair");
+        }
+        f = four(); if(f){                         // one pair NOT matched
+          const [r1, r2, r3, r4] = f;
+          if(!isTrue(r1[0], r2[1])) Q(s, c, "Hard", `Which of the following pairs is NOT correctly matched?${relTxt}`, pr(r1[0], r2[1]),
+            [r2, r3, r4].map(r => [pr(r[0], r[1]), `This pair is correct: ${r[0]} does go with ${r[1]}.`]),
+            [`Check every pair: ${[r2, r3, r4].map(r => pr(r[0], r[1]) + " ✓").join("; ")}.`, `${r1[0]} should be paired with ${r1[1]}, not ${r2[1]}. So “${pr(r1[0], r2[1])}” is the mismatched pair.`],
+            "In NOT-matched questions, test all four pairs; only one is wrong.", "Board pattern · Match the pair");
+        }
+        f = four(); if(f){                         // match the columns
+          const colB = shuf(f.map(r => r[1])), code = f.map((r, i) => "ABCD"[i] + "-" + ROMAN[colB.indexOf(r[1])].replace(/[()]/g, ""));
+          const right = code.join(", ");
+          const perms = [[1, 0, 3, 2], [2, 3, 0, 1], [3, 2, 1, 0], [1, 2, 3, 0], [3, 0, 1, 2], [0, 1, 3, 2], [1, 0, 2, 3]];
+          const wrongs = shuf(perms).map(p => p.map((j, i) => "ABCD"[i] + "-" + ROMAN[colB.indexOf(f[j][1])].replace(/[()]/g, "")).join(", ")).filter(x => x !== right);
+          Q(s, c, "Hard", `Match Column I with Column II${relTxt}:<br><b>Column I:</b> ${f.map((r, i) => "ABCD"[i] + ". " + r[0]).join(";  ")}<br><b>Column II:</b> ${colB.map((b, i) => ROMAN[i] + " " + b).join(";  ")}`,
+            right, wrongs.slice(0, 3).map(x => [x, "At least one letter is joined to the wrong item in Column II."]),
+            f.map((r, i) => `${"ABCD"[i]}. ${r[0]} → ${ROMAN[colB.indexOf(r[1])]} ${r[1]}`).concat([`So the code is ${right}.`]),
+            "Match the items you are surest about first; that usually leaves only one possible code.", "Board pattern · Match the columns");
+        }
+      }
+    });
+  }));
+
+  // ---------- derived: which statement is incorrect / correct ----------
+  Object.entries(B).forEach(([s, v]) => Object.entries(v.chapters).forEach(([c, qs]) => {
+    if(s === "English" && c === "Grammar") return;
+    const verbish = q => /(is|are|was|were):\s*$/.test(plainQ(q.q)) && /^[A-Z]?[a-z]+(s|es|ed|ing)\b/.test(q.opts[q.ans]) && !/^(Glucose|Sucrose|Rays|Gametes|Cells|Lens|Bus)/.test(q.opts[q.ans]);
+    const cands = qs.filter(q => !q.detailedSolution && !q.type && !q.src && !/refers to|is\/are|where '|’s meaning|in the passage/i.test(q.q) && !/\d/.test(plainQ(q.q) + q.opts.join(" ")) && !verbish(q) && !/assertion|not |except|incorrect|false|which|choose|identify|match|<|___|\?/i.test(q.q) && /(is|are|was|were|called|causes|of|by|in|to|has|have|forms?|gives?|produces?|contains?):\s*$/.test(plainQ(q.q))
+      && plainQ(q.q).length < 120 && q.opts.every(o => typeof o === "string" && o.length < 60 && !/all of|none of|both|neither|^\s*\d+(\.\d+)?\s*$/i.test(o)) && !fixedOrder(q));
+    if(cands.length < (s === "English" ? 6 : 8)) return;
+    const st = (q, i) => statementOf({q: q.q, opts: q.opts, ans: i});
+    const easyShare = qs.filter(q => q.diff === "Easy").length / qs.length, boost = easyShare > 0.3 ? 2 : 1;
+    const tail = q => plainQ(q.q).toLowerCase().split(/\s+/).slice(-3).join(" ");
+    const four = () => { const out = [], ans = new Set(), tl = new Map();   // four different facts: no shared answer, at most two of one stem pattern
+      for(const q of shuf(cands)){ const a = q.opts[q.ans], t = tail(q); if(ans.has(a) || (tl.get(t) || 0) >= 2 || out.some(x => numTpl(x) === numTpl(q))) continue;
+        out.push(q); ans.add(a); tl.set(t, (tl.get(t) || 0) + 1); if(out.length === 4) break; }
+      return out; };
+    const falseOf = q => st(q, shuf(q.opts.map((_, i) => i).filter(i => i !== q.ans))[0]);
+    // "How many of the following statements are correct?" (competency-based board pattern)
+    for(let k = 0; k < Math.min(4 * boost, Math.floor(cands.length / 4)); k++){
+      const g = four(); if(g.length < 4) break;
+      const nTrue = ri(1, 4), lines = g.map((q, i) => i < nTrue ? [st(q, q.ans), true, q] : [falseOf(q), false, q]);
+      const sh = shuf(lines), W = ["Only one", "Two", "Three", "All four"];
+      Q(s, c, "Hard", "How many of the following statements are correct?<br>" + sh.map((l, i) => ROMAN[i] + " " + l[0]).join("<br>"), W[nTrue - 1],
+        W.filter((_, i) => i !== nTrue - 1).map(w => [w, `Exactly ${nTrue === 1 ? "one statement is" : W[nTrue - 1].toLowerCase() + " statements are"} correct.`]),
+        sh.map((l, i) => `${ROMAN[i]} ${l[1] ? "Correct." : "Incorrect. Correct version: " + st(l[2], l[2].ans)}`).concat([`So ${W[nTrue - 1].toLowerCase()} correct.`]),
+        "Judge every statement on its own; don't stop after finding one wrong.", "Board pattern · Statement based (competency)", "Statement count");
+    }
+    // "Which of the statements are correct? (a) I and II only ..."
+    for(let k = 0; k < Math.min(3 * boost, Math.floor(cands.length / 4)); k++){
+      const g = four(); if(g.length < 4) break;
+      const combos = [[0, 1], [0, 2], [1, 2], [1, 3], [2, 3], [0, 3], [0, 1, 2], [1, 2, 3], [0, 2, 3]];
+      const right = pick(combos), lines = g.map((q, i) => right.includes(i) ? [st(q, q.ans), true, q] : [falseOf(q), false, q]);
+      const lab = cb => cb.map(i => ["I", "II", "III", "IV"][i]).join(cb.length === 2 ? " and " : ", ").replace(/, (\w+)$/, " and $1") + " only";
+      const wr = shuf(combos.filter(cb => cb.join() !== right.join())).slice(0, 3);
+      Q(s, c, "Hard", "Consider the following statements:<br>" + lines.map((l, i) => ["I", "II", "III", "IV"][i] + ". " + l[0]).join("<br>") + "<br>Which of these are correct?", lab(right),
+        wr.map(cb => [lab(cb), "This set includes a false statement or leaves out a true one."]),
+        lines.map((l, i) => `${["I", "II", "III", "IV"][i]}: ${l[1] ? "true" : "false — correct version: " + st(l[2], l[2].ans)}`).concat([`So the answer is ${lab(right)}.`]),
+        "Mark each statement T or F first, then find the option with exactly the true ones.", "Board pattern · Statement based (competency)", "Statement combo");
+    }
+    const nInc = Math.min(6, Math.floor(cands.length / 4)), nCor = Math.min(4, Math.floor(cands.length / 6));
+    for(let k = 0; k < nInc; k++){
+      const g = shuf(cands).filter((q, i, a) => a.findIndex(x => numTpl(x) === numTpl(q)) === i).slice(0, 4); if(g.length < 4) break;
+      const bad = g[0], wi = shuf(bad.opts.map((_, i) => i).filter(i => i !== bad.ans))[0];
+      const falseS = st(bad, wi), trueS = g.slice(1).map(q => st(q, q.ans));
+      Q(s, c, "Hard", "Which of the following statements is incorrect?", falseS, trueS.map(t => [t, "This statement is true."]),
+        [`Test each statement. ${trueS.length} of them are true.`, `The incorrect one is: “${falseS}”`, `Correct version: ${st(bad, bad.ans)}`],
+        "In statement questions, look for the one fact that has been swapped; all the others are exact facts.", "Board pattern · Statement based");
+    }
+    for(let k = 0; k < nCor; k++){
+      const g = shuf(cands).filter((q, i, a) => a.findIndex(x => numTpl(x) === numTpl(q)) === i).slice(0, 4); if(g.length < 4) break;
+      const good = g[0], falses = g.slice(1).map(q => { const wi = shuf(q.opts.map((_, i) => i).filter(i => i !== q.ans))[0]; return [st(q, wi), `False. Correct version: ${st(q, q.ans)}`]; });
+      Q(s, c, "Medium", "Which of the following statements is correct?", st(good, good.ans), falses,
+        [`Only one statement is a true fact: “${st(good, good.ans)}”`].concat(falses.map(f => f[1])),
+        "Read every statement fully; one swapped word makes it false.", "Board pattern · Statement based");
+    }
+  }));
+
+  // ---------- derived (English): which sentence is grammatically correct / incorrect ----------
+  if(B.English && B.English.chapters.Grammar){
+    const gq = B.English.chapters.Grammar.filter(q => /^Choose the correct option:\s*/.test(q.q) && /___/.test(q.q) && q.opts.every(o => o.length < 30));
+    const sent = (q, i) => q.q.replace(/^Choose the correct option:\s*/, "").replace("___", q.opts[i]);
+    for(let k = 0; k < Math.min(30, Math.floor(gq.length / 3)); k++){
+      const q = pick(gq), ok = sent(q, q.ans);
+      Q("English", "Grammar", "Medium", "Which sentence is grammatically correct?", ok, q.opts.map((o, i) => i === q.ans ? null : [sent(q, i), `“${o}” is the wrong form here.`]).filter(Boolean),
+        [`The correct sentence is: “${ok}”`, `The blank needed “${q.opts[q.ans]}”.`], "Read the whole sentence: time words and the subject decide the verb form.", "Board pattern · Grammar");
+    }
+    for(let k = 0; k < Math.min(40, Math.floor(gq.length / 4)); k++){
+      const g = shuf(gq).filter((q, i, a) => a.findIndex(x => x.q === q.q) === i).slice(0, 4); if(g.length < 4) break;
+      const bad = g[0], wi = shuf(bad.opts.map((_, i) => i).filter(i => i !== bad.ans))[0], badS = sent(bad, wi);
+      Q("English", "Grammar", "Hard", "Which sentence is grammatically INCORRECT?", badS, g.slice(1).map(q => [sent(q, q.ans), "This sentence is correct."]),
+        [`“${badS}” is wrong: it needs “${bad.opts[bad.ans]}” instead of “${bad.opts[wi]}”.`, `Correct: “${sent(bad, bad.ans)}”`], "Check the tense and subject–verb agreement in each sentence.", "Board pattern · Grammar");
+    }
+    // two blanks at once: both must be right (Hard)
+    for(let k = 0; k < Math.min(50, Math.floor(gq.length / 3)); k++){
+      const [a, b] = shuf(gq).filter((q, i, arr) => arr.findIndex(x => x.q === q.q) === i).slice(0, 2); if(!b) break;
+      const wa = shuf(a.opts.map((_, i) => i).filter(i => i !== a.ans))[0], wb = shuf(b.opts.map((_, i) => i).filter(i => i !== b.ans))[0];
+      const P = (i, j) => `${a.opts[i]} / ${b.opts[j]}`, bare = q => q.q.replace(/^Choose the correct option:\s*/, "");
+      Q("English", "Grammar", "Hard", `Choose the option that correctly fills BOTH blanks:<br>1. ${bare(a)}<br>2. ${bare(b)}`, P(a.ans, b.ans),
+        [[P(wa, b.ans), `Blank 1 is wrong: it needs “${a.opts[a.ans]}”.`], [P(a.ans, wb), `Blank 2 is wrong: it needs “${b.opts[b.ans]}”.`], [P(wa, wb), "Both blanks are wrong."]],
+        [`1. ${sent(a, a.ans)}`, `2. ${sent(b, b.ans)}`], "Solve each blank separately; an option is right only if both parts are right.", "Board pattern · Grammar", "Grammar two-blank");
+    }
+  }
+
+  // ---------- numerical templates (per class) ----------
+  const H_ = {T, Q, ri, pick, shuf, rnd, gcd, M, num, frac, sci, sup};
+  (cls === "12" ? EXTRA12 : EXTRA10)(H_);
+  if(cls === "10") EXTRA10B(H_);
+  return made;
+}
+
+// ---- Class 10: more Medium/Hard variety for the high-weightage chapters (each block is its own question type) ----
+function EXTRA10B(h){
+  const {T, Q, ri, pick, shuf, gcd} = h;
+  const H = "Hard", Md = "Medium", MA = "Maths", SC = "Science";
+  const sg = n => n < 0 ? "− " + (-n) : "+ " + n, neg = n => String(n).replace("-", "−");
+
+  // ===== Polynomials =====
+  T(MA, "Polynomials", Md, 6, () => { const a = ri(1, 3), p = ri(-6, 6), q = ri(-6, 6); if(!p || !q || p === q || p === -q) return null; const b = -a * (p + q), c = a * p * q;
+    return {q: `If α and β are the zeroes of ${a === 1 ? "" : a}x² ${sg(b)}x ${sg(c)}, the value of α² + β² is:`.replace("+ 0x ", ""), a: String(p * p + q * q),
+      w: [[String((p + q) ** 2), "That's (α + β)²; subtract 2αβ."], [String((p + q) ** 2 + 2 * p * q), "α² + β² = (α + β)² − 2αβ, not + 2αβ."], [String(p * p + q * q + 2), "Recheck αβ = c/a."]],
+      s: [`α + β = −b/a = ${neg(p + q)}, αβ = c/a = ${neg(p * q)}.`, `α² + β² = (α + β)² − 2αβ = ${(p + q) ** 2} − (${neg(2 * p * q)}) = ${p * p + q * q}.`], r: "α² + β² = (α + β)² − 2αβ."}; });
+  T(MA, "Polynomials", H, 6, () => { const p = ri(1, 7), q = ri(1, 7); if(p === q) return null; const s = p + q, P = p * q;
+    return {q: `If α and β are the zeroes of x² − ${s}x + ${P}, the value of 1/α + 1/β is:`, a: `${s / gcd(s, P)}/${P / gcd(s, P)}`.replace(/\/1$/, ""),
+      w: [[`${P / gcd(s, P)}/${s / gcd(s, P)}`.replace(/\/1$/, ""), "1/α + 1/β = (α + β)/αβ — you inverted it."], [String(s + P), "Add the fractions properly: (α + β)/αβ."], [`−${s / gcd(s, P)}/${P / gcd(s, P)}`.replace(/\/1$/, ""), "α + β = −b/a = +" + s + " here."]],
+      s: [`α + β = ${s}, αβ = ${P}.`, `1/α + 1/β = (α + β)/αβ = ${s}/${P}.`], r: "Combine the fractions first, then use sum and product of zeroes."}; });
+  T(MA, "Polynomials", H, 5, () => { const s = ri(-5, 7), P = ri(-8, 8); if(!P || !s) return null; const E = (x, y) => `x² ${sg(x)}x ${sg(y)}`;
+    return {q: `A quadratic polynomial whose sum of zeroes is ${neg(s)} and product of zeroes is ${neg(P)} is (k is a non-zero constant):`, a: `k(${E(-s, P)})`,
+      w: [[`k(${E(s, P)})`, "The x-coefficient is −(sum of zeroes)."], [`k(${E(-P, s)})`, "Sum goes with x, product is the constant."], [`k(${E(-s, -P)})`, "The constant term is +(product)."]],
+      s: ["A quadratic with zeroes α, β is k[x² − (α + β)x + αβ].", `= k[x² − (${neg(s)})x + (${neg(P)})] = k(${E(-s, P)}).`], r: "x² − (sum)x + (product)."}; });
+  Q(MA, "Polynomials", H, "If one zero of 2x² − 3x + k is the reciprocal of the other, then k equals:", "2", [["3", "Product of zeroes = k/2 must be 1."], ["1/2", "k/2 = 1 gives k = 2."], ["−2", "The product α·(1/α) = 1, which is positive."]],
+    ["If the zeroes are α and 1/α, their product is 1.", "Product = c/a = k/2 = 1, so k = 2."], "Reciprocal zeroes ⇒ product = 1 ⇒ c = a.");
+  Q(MA, "Polynomials", Md, "The graph of y = p(x) cuts the x-axis at 3 points and touches it nowhere else. The number of zeroes of p(x) is:", "3", [["2", "Every crossing of the x-axis is a zero."], ["1", "Count all three intersection points."], ["0", "Zeroes are where the graph meets the x-axis."]],
+    ["The zeroes of p(x) are the x-coordinates where the graph meets the x-axis.", "It meets the axis at 3 points, so 3 zeroes."], "Number of zeroes = number of points where the graph meets the x-axis.");
+  Q(MA, "Polynomials", H, "If the zeroes of x² + px + q are double in value of the zeroes of 2x² − 5x − 3, then (p, q) is:", "(−5, −6)", [["(5, 6)", "Signs: sum = 5 so p = −5; product = −6 so q = −6."], ["(−5, 6)", "Product of the new zeroes is 4 × (−3/2) = −6."], ["(5, −6)", "Sum of the new zeroes is 5, so p = −5."]],
+    ["Zeroes of 2x² − 5x − 3: sum = 5/2, product = −3/2.", "Doubled zeroes: sum = 5, product = 4 × (−3/2) = −6.", "x² + px + q has sum −p = 5 ⇒ p = −5 and product q = −6."], "Doubling the zeroes doubles the sum and multiplies the product by 4.");
+
+  // ===== Pair of linear equations =====
+  T(MA, "Pair of Linear Equations in Two Variables", H, 6, () => { const a = ri(2, 6), b = ri(1, 7), m = ri(2, 3), c = ri(3, 9), c2 = m * c + ri(1, 4);
+    return {q: `For what value of k does the pair ${a}x + ${b}y = ${c} and ${a * m}x + ky = ${c2} have no solution?`, a: String(b * m),
+      w: [[String(b * m + 1), "For no solution: a₁/a₂ = b₁/b₂ ≠ c₁/c₂."], [String(b), "a₁/a₂ = 1/" + m + ", so k must be " + m + " × " + b + "."], [String(a * m), "Match the y-coefficient ratio to the x-coefficient ratio."]],
+      s: ["No solution ⇒ a₁/a₂ = b₁/b₂ ≠ c₁/c₂.", `${a}/${a * m} = ${b}/k ⇒ k = ${b * m}.`, `c₁/c₂ = ${c}/${c2} ≠ 1/${m}, so the lines are parallel.`], r: "Parallel lines: a₁/a₂ = b₁/b₂ ≠ c₁/c₂."}; });
+  T(MA, "Pair of Linear Equations in Two Variables", H, 6, () => { const x = ri(3, 9), y = ri(2, 8); if(x === y) return null; const s = ri(10, 25) * 10, t = ri(5, 15) * 10;
+    const n1 = ri(2, 4), m1 = ri(1, 3), n2 = ri(1, 3), m2 = ri(2, 5); if(n1 * m2 === n2 * m1) return null;
+    const c1 = n1 * s + m1 * t, c2 = n2 * s + m2 * t;
+    return {q: `${n1} pens and ${m1} notebooks cost ₹${c1}; ${n2} pen${n2 > 1 ? "s" : ""} and ${m2} notebooks cost ₹${c2}. The cost of one notebook is:`, a: "₹" + t,
+      w: [["₹" + s, "That's the cost of a pen."], ["₹" + (t + 10), "Recheck the elimination step."], ["₹" + Math.round((c1 + c2) / (n1 + m1 + n2 + m2)), "Averaging doesn't solve simultaneous equations."]],
+      s: [`${n1}p + ${m1}n = ${c1} and ${n2}p + ${m2}n = ${c2}.`, `Eliminate p: multiply and subtract to get n = ${t}.`, `Then p = ${s}.`], r: "Form two equations, then eliminate one variable."}; });
+  Q(MA, "Pair of Linear Equations in Two Variables", H, "For what value of k will kx + 3y = k − 3 and 12x + ky = k have no solution?", "−6", [["6", "k = 6 makes all three ratios equal: infinitely many solutions."], ["±6", "Only k = −6 keeps c₁/c₂ different."], ["3", "k/12 = 3/k ⇒ k² = 36."]],
+    ["No solution ⇒ k/12 = 3/k ≠ (k − 3)/k.", "k² = 36 ⇒ k = ±6.", "k = 6: (k − 3)/k = 1/2 = 3/6 → coincident. k = −6: 9/6 ≠ −1/2 → no solution."], "Always check the third ratio after solving for k.");
+  Q(MA, "Pair of Linear Equations in Two Variables", Md, "The pair of equations x = 4 and y = −3 graphically represents lines that:", "Intersect at (4, −3)", [["Are parallel", "x = 4 is vertical and y = −3 is horizontal; they must meet."], ["Coincide", "They are different lines."], ["Intersect at (−3, 4)", "The x-coordinate is fixed at 4 and y at −3."]],
+    ["x = 4 is a vertical line, y = −3 a horizontal line.", "A vertical and a horizontal line always meet once, at (4, −3)."], "x = a is vertical, y = b is horizontal.");
+  Q(MA, "Pair of Linear Equations in Two Variables", H, "The sum of the digits of a two-digit number is 9. Nine times the number equals twice the number obtained by reversing the digits. The number is:", "18", [["81", "Check: 9 × 81 ≠ 2 × 18."], ["27", "Check: 9 × 27 = 243, 2 × 72 = 144."], ["36", "9 × 36 = 324, 2 × 63 = 126."]],
+    ["Let the number be 10x + y with x + y = 9.", "9(10x + y) = 2(10y + x) ⇒ 88x = 11y ⇒ y = 8x.", "x + 8x = 9 ⇒ x = 1, y = 8 ⇒ number = 18."], "Write the number as 10x + y; the reverse is 10y + x.");
+
+  // ===== Quadratic Equations =====
+  T(MA, "Quadratic Equations", H, 6, () => { const a = ri(1, 4), m = ri(2, 7), kk = 2 * a * m; // ax² − kx + a m² has equal roots when k = 2am
+    return {q: `The positive value of k for which ${a === 1 ? "" : a}x² − kx + ${a * m * m} = 0 has equal roots is:`, a: String(kk),
+      w: [[String(a * m), "Equal roots need b² = 4ac: k² = 4 × " + a + " × " + a * m * m + "."], [String(kk * kk), "That's k², take the square root."], [String(4 * a * m * m), "Square-root 4ac, don't stop at 4c."]],
+      s: ["Equal roots ⇒ D = b² − 4ac = 0.", `k² = 4 × ${a} × ${a * m * m} = ${kk * kk}.`, `k = ${kk}.`], r: "Equal roots: b² − 4ac = 0."}; });
+  T(MA, "Quadratic Equations", H, 6, () => { const d = pick([2, 3, 4, 5]), x = ri(d + 2, 15); const P = x * (x + d);
+    return {q: `Two positive integers differ by ${d} and their product is ${P}. The smaller integer is:`, a: String(x),
+      w: [[String(x + d), "That's the larger one."], [String(x - d), "Check: " + (x - d) + " × " + x + " ≠ " + P + "."], [String(Math.round(Math.sqrt(P))), "√P only approximates the pair."]],
+      s: [`x(x + ${d}) = ${P} ⇒ x² + ${d}x − ${P} = 0.`, `Factorise: (x − ${x})(x + ${x + d}) = 0.`, `Positive root x = ${x}.`], r: "Form the quadratic, factorise, reject the negative root."}; });
+  T(MA, "Quadratic Equations", H, 5, () => { const v = pick([40, 45, 50, 60]), d = pick([300, 360, 450, 600]), inc = pick([5, 10, 15]); const t1 = d / v, t2 = d / (v + inc); const diff = t1 - t2; if(Math.abs(diff * 60 - Math.round(diff * 60)) > 1e-9) return null;
+    return {q: `A train travels ${d} km at a uniform speed. If the speed were ${inc} km/h more, it would take ${Math.round(diff * 60)} minutes less. Its usual speed is:`, a: v + " km/h",
+      w: [[(v + inc) + " km/h", "That's the increased speed."], [(v - inc) + " km/h", "Check the time difference with this speed."], [(v + 2 * inc) + " km/h", "Substitute back: the times don't differ by the given amount."]],
+      s: [`${d}/x − ${d}/(x + ${inc}) = ${Math.round(diff * 60)}/60.`, "Clear denominators to get a quadratic in x.", `Its positive root is x = ${v} km/h.`], r: "Time = distance/speed; equate the difference of times."}; });
+  Q(MA, "Quadratic Equations", Md, "Which of the following equations has two distinct real roots?", "2x² − 3x − 1 = 0", [["x² + x + 1 = 0", "D = 1 − 4 = −3 < 0: no real roots."], ["x² − 4x + 4 = 0", "D = 16 − 16 = 0: equal roots."], ["3x² + 2x + 1 = 0", "D = 4 − 12 < 0."]],
+    ["Two distinct real roots need D > 0.", "2x² − 3x − 1: D = 9 + 8 = 17 > 0."], "D > 0 distinct, D = 0 equal, D < 0 no real roots.");
+
+  // ===== Arithmetic Progressions =====
+  T(MA, "Arithmetic Progressions", H, 6, () => { const a = ri(-5, 12), d = ri(2, 7), n = ri(15, 40);
+    const l = a + (n - 1) * d, k = ri(3, 10);
+    return {q: `The ${k}${k === 3 ? "rd" : "th"} term from the end of the AP ${a}, ${a + d}, ${a + 2 * d}, …, ${l} is:`.replace(/-/g, "−"), a: neg(l - (k - 1) * d),
+      w: [[neg(a + (k - 1) * d), "That's the " + k + "th term from the beginning."], [neg(l - k * d), "From the end: l − (k − 1)d, not l − kd."], [neg(l - (k + 1) * d), "Use k − 1 steps back from the last term."]],
+      s: [`From the end the AP runs with first term ${l} and common difference −${d}.`, `Term = ${l} − (${k} − 1) × ${d} = ${l - (k - 1) * d}.`], r: "k-th term from the end = l − (k − 1)d."}; });
+  T(MA, "Arithmetic Progressions", H, 6, () => { const lo = ri(1, 4) * 10, hi = lo + ri(5, 15) * 10, m = pick([3, 4, 6, 7, 9]); const f = Math.ceil(lo / m) * m, L = Math.floor(hi / m) * m, n = (L - f) / m + 1;
+    return {q: `How many numbers between ${lo} and ${hi} (inclusive) are divisible by ${m}, and what is their sum?`, a: `${n} numbers, sum ${n * (f + L) / 2}`,
+      w: [[`${n + 1} numbers, sum ${(n + 1) * (f + L) / 2}`, "Count again: n = (l − a)/d + 1."], [`${n} numbers, sum ${n * (f + L)}`, "Sum = n/2 × (a + l)."], [`${n - 1} numbers, sum ${(n - 1) * (f + L - m) / 2}`, "Include both the first (" + f + ") and the last (" + L + ") multiple."]],
+      s: [`First multiple ${f}, last ${L}, d = ${m}.`, `n = (${L} − ${f})/${m} + 1 = ${n}.`, `Sum = ${n}/2 × (${f} + ${L}) = ${n * (f + L) / 2}.`], r: "Find the first and last terms, then n, then S = n(a + l)/2."}; });
+  T(MA, "Arithmetic Progressions", H, 6, () => { const a = ri(2, 9), d = ri(2, 6), n = ri(8, 20), S = n * (2 * a + (n - 1) * d) / 2;
+    return {q: `How many terms of the AP ${a}, ${a + d}, ${a + 2 * d}, … must be taken to give a sum of ${S}?`, a: String(n),
+      w: [[String(n + 1), "Check S for this n."], [String(n - 2), "Solve n/2[2a + (n − 1)d] = S carefully."], [String(2 * n), "Reject the extra root only if negative."]],
+      s: [`n/2 [2 × ${a} + (n − 1)${d}] = ${S}.`, `This gives a quadratic in n whose positive root is ${n}.`], r: "Sₙ = n/2[2a + (n − 1)d]; solve for n."}; });
+  Q(MA, "Arithmetic Progressions", Md, "If the n-th term of an AP is 3 − 4n, its common difference is:", "−4", [["4", "aₙ₊₁ − aₙ = (3 − 4n − 4) − (3 − 4n) = −4."], ["3", "3 is part of the constant term."], ["−1", "First term is −1 but d = a₂ − a₁ = −5 − (−1)."]],
+    ["a₁ = −1, a₂ = −5.", "d = a₂ − a₁ = −4."], "For aₙ = pn + q, the common difference is p.");
+  Q(MA, "Arithmetic Progressions", H, "If Sₙ = 3n² + 5n for an AP, its 10th term is:", "62", [["350", "That's S₁₀; a₁₀ = S₁₀ − S₉."], ["8", "That's the first term."], ["56", "a₁₀ = 350 − 288 = 62."]],
+    ["aₙ = Sₙ − Sₙ₋₁.", "S₁₀ = 300 + 50 = 350, S₉ = 243 + 45 = 288.", "a₁₀ = 350 − 288 = 62."], "nth term = Sₙ − Sₙ₋₁.");
+
+  // ===== Triangles / Circles =====
+  T(MA, "Triangles", H, 6, () => { const ad = ri(2, 7), db = ri(2, 7), ae = ri(2, 9) * ad; if(ad === db) return null; const ec = ae * db / ad;
+    return {q: `In △ABC, DE ∥ BC with D on AB and E on AC. If AD = ${ad} cm, DB = ${db} cm and AE = ${ae} cm, then EC is:`, a: ec + " cm",
+      w: [[(ae * ad / db).toFixed(1).replace(".0", "") + " cm", "BPT: AD/DB = AE/EC, so EC = AE × DB/AD."], [(ae + db - ad) + " cm", "BPT is a ratio, not a difference."], [(ae * (ad + db) / ad) + " cm", "That's AC, not EC."]],
+      s: ["By the Basic Proportionality Theorem, AD/DB = AE/EC.", `${ad}/${db} = ${ae}/EC ⇒ EC = ${ae} × ${db}/${ad} = ${ec} cm.`], r: "A line parallel to one side divides the other two in the same ratio."}; });
+  T(MA, "Triangles", H, 5, () => { const s1 = pick([1.2, 1.5, 2, 2.4, 3]), k = pick([5, 8, 10, 12, 15, 20]), sh1 = pick([0.8, 1, 1.6, 2]); if(s1 === sh1) return null; const tower = +(s1 * k).toFixed(2), tsh = +(sh1 * k).toFixed(2);
+    return {q: `A ${s1} m tall pole casts a ${sh1} m shadow. At the same time a tower casts a ${tsh} m shadow. The height of the tower is:`, a: tower + " m",
+      w: [[+(tsh * sh1 / s1).toFixed(2) + " m", "Height/shadow is " + s1 + "/" + sh1 + "; you inverted the ratio."], [+(tsh + s1 - sh1).toFixed(2) + " m", "Similar triangles give a ratio, not a difference."], [+(tower * 2).toFixed(2) + " m", "Recheck: h = shadow × " + s1 + "/" + sh1 + "."]],
+      s: ["Sun's rays make similar triangles.", `${s1}/${sh1} = h/${tsh}.`, `h = ${tsh} × ${s1}/${sh1} = ${tower} m.`], r: "At the same time, height ∝ shadow length."}; });
+  T(MA, "Circles", H, 6, () => { const r = pick([5, 6, 7, 8, 9, 12, 15]), t = pick([12, 8, 24, 35, 40, 9, 20]); const d2 = r * r + t * t, d = Math.sqrt(d2); if(d % 1) return null;
+    return {q: `From a point P, ${d} cm from the centre of a circle of radius ${r} cm, a tangent PT is drawn. The length of PT is:`, a: t + " cm",
+      w: [[(d - r) + " cm", "PT is not d − r; use Pythagoras since OT ⊥ PT."], [Math.round(Math.sqrt(d2 + r * r)) + " cm", "Subtract r², don't add."], [(d + r) + " cm", "That's longer than OP, impossible for a tangent."]],
+      s: ["The radius is perpendicular to the tangent at T.", `PT² = OP² − OT² = ${d2} − ${r * r} = ${t * t}.`, `PT = ${t} cm.`], r: "Tangent ⊥ radius: PT² = OP² − r²."}; });
+  Q(MA, "Circles", H, "Two tangents TP and TQ are drawn to a circle with centre O from an external point T. If ∠PTQ = 70°, then ∠POQ is:", "110°", [["70°", "∠PTQ + ∠POQ = 180° in quadrilateral OPTQ."], ["140°", "That would be 2 × 70°, which applies to inscribed angles, not here."], ["35°", "That's half of ∠PTQ."]],
+    ["OP ⊥ TP and OQ ⊥ TQ, so ∠OPT = ∠OQT = 90°.", "In quadrilateral OPTQ: ∠POQ = 360° − 90° − 90° − 70° = 110°."], "Angle between tangents + angle at centre = 180°.");
+  Q(MA, "Circles", Md, "A quadrilateral ABCD is drawn to circumscribe a circle. If AB = 6 cm, BC = 7 cm and CD = 4 cm, then AD is:", "3 cm", [["5 cm", "AB + CD = BC + AD ⇒ AD = 10 − 7."], ["9 cm", "Sum of opposite sides are equal, not adjacent."], ["17 cm", "That's the sum of the three sides."]],
+    ["Tangents from an external point are equal ⇒ AB + CD = BC + AD.", "6 + 4 = 7 + AD ⇒ AD = 3 cm."], "Circumscribed quadrilateral: opposite sides add up equally.");
+
+  // ===== Coordinate Geometry (Medium) =====
+  T(MA, "Coordinate Geometry", Md, 6, () => { const x1 = ri(-6, 6), y1 = ri(-6, 6), x2 = ri(-6, 6), y2 = ri(-6, 6); if(x1 === x2 && y1 === y2) return null; const dx = x2 - x1, dy = y2 - y1, D = dx * dx + dy * dy; if(Math.sqrt(D) % 1) return null; const d = Math.sqrt(D);
+    return {q: `The distance between (${neg(x1)}, ${neg(y1)}) and (${neg(x2)}, ${neg(y2)}) is:`, a: d + " units",
+      w: [[(Math.abs(dx) + Math.abs(dy)) + " units", "Distance is √(Δx² + Δy²), not |Δx| + |Δy|."], [D + " units", "Take the square root."], [(d + 1) + " units", "Recheck the differences."]],
+      s: [`Δx = ${dx}, Δy = ${dy}.`, `d = √(${dx * dx} + ${dy * dy}) = √${D} = ${d}.`], r: "d = √[(x₂ − x₁)² + (y₂ − y₁)²]."}; });
+  T(MA, "Coordinate Geometry", Md, 6, () => { const x1 = ri(-5, 5) * 2, y1 = ri(-5, 5) * 2, x2 = ri(-5, 5) * 2, y2 = ri(-5, 5) * 2; if(x1 === x2) return null;
+    return {q: `The midpoint of the line segment joining A(${neg(x1)}, ${neg(y1)}) and B(${neg(x2)}, ${neg(y2)}) is:`, a: `(${neg((x1 + x2) / 2)}, ${neg((y1 + y2) / 2)})`,
+      w: [[`(${neg((x2 - x1) / 2)}, ${neg((y2 - y1) / 2)})`, "Add the coordinates, don't subtract."], [`(${neg(x1 + x2)}, ${neg(y1 + y2)})`, "Divide the sums by 2."], [`(${neg((y1 + y2) / 2)}, ${neg((x1 + x2) / 2)})`, "x and y have been swapped."]],
+      s: [`x = (${x1} + ${x2})/2 = ${(x1 + x2) / 2}.`, `y = (${y1} + ${y2})/2 = ${(y1 + y2) / 2}.`], r: "Midpoint = ((x₁ + x₂)/2, (y₁ + y₂)/2)."}; });
+  T(MA, "Coordinate Geometry", H, 6, () => { const m = ri(1, 4), n = ri(1, 4); if(m === n || gcd(m, n) > 1) return null; const x1 = ri(-6, 6), x2 = x1 + (m + n) * ri(1, 3), y1 = ri(-6, 6), y2 = y1 + (m + n) * ri(-2, 2); const px = (m * x2 + n * x1) / (m + n), py = (m * y2 + n * y1) / (m + n);
+    return {q: `In what ratio does the point (${neg(px)}, ${neg(py)}) divide the segment joining (${neg(x1)}, ${neg(y1)}) and (${neg(x2)}, ${neg(y2)})?`, a: `${m} : ${n}`,
+      w: [[`${n} : ${m}`, "Ratio is measured from the first point: AP : PB."], [`${(m + n) / gcd(m + n, n)} : ${n / gcd(m + n, n)}`, "Use k : 1 with x = (kx₂ + x₁)/(k + 1)."], [`1 : ${m + n}`, "Recheck the section formula."]],
+      s: ["Let the ratio be k : 1.", `${px} = (k × ${x2} + ${x1})/(k + 1) ⇒ k = ${m}/${n}.`, `Ratio = ${m} : ${n}.`], r: "Take the ratio k : 1 and solve using one coordinate."}; });
+  Q(MA, "Coordinate Geometry", Md, "The point on the x-axis that is equidistant from (2, −5) and (−2, 9) is:", "(−7, 0)", [["(7, 0)", "Solve (x − 2)² + 25 = (x + 2)² + 81 ⇒ −8x = 56."], ["(0, −7)", "A point on the x-axis has y = 0."], ["(−5, 0)", "Recheck the expansion."]],
+    ["Let the point be (x, 0).", "(x − 2)² + 25 = (x + 2)² + 81 ⇒ −8x = 56 ⇒ x = −7."], "Points on the x-axis are (x, 0); equate squared distances.");
+  Q(MA, "Coordinate Geometry", Md, "The points (1, 5), (2, 3) and (−2, −11) are:", "Not collinear", [["Collinear", "Slope of first two = −2, slope of last two = 3.5; not equal."], ["Vertices of a right triangle at (2, 3)", "Check by the Pythagoras theorem: it doesn't hold."], ["The same point", "They are clearly different points."]],
+    ["Use distances: AB = √5, BC = √212, AC = √265.", "AB + BC ≠ AC, so they are not collinear."], "Collinear ⇔ the sum of two distances equals the third.");
+
+  // ===== Trigonometry =====
+  T(MA, "Introduction to Trigonometry", H, 6, () => { const [p, b, hh] = pick([[3, 4, 5], [5, 12, 13], [8, 15, 17], [7, 24, 25], [20, 21, 29]]); const g = gcd(p + b, b - p), A = (p + b) / g, B = (b - p) / g, fr = (x, y) => y === 1 ? String(x) : `${x}/${y}`;
+    return {q: `If tan A = ${p}/${b}, then (sin A + cos A)/(sin A − cos A) equals:`, a: "−" + fr(A, B),
+      w: [[fr(A, B), "sin A − cos A is negative here (tan A < 1), so the value is negative."], ["−" + fr(B, A), "Numerator is sin A + cos A: (tan A + 1)/(tan A − 1)."], [fr(p + b, hh), "Divide numerator and denominator by cos A, not by the hypotenuse."]],
+      s: ["Divide numerator and denominator by cos A.", `(tan A + 1)/(tan A − 1) = (${p}/${b} + 1)/(${p}/${b} − 1) = ${p + b}/(${p - b}) = −${fr(A, B)}.`], r: "Divide by cos A to turn sin/cos into tan."}; });
+  Q(MA, "Introduction to Trigonometry", H, "If sin θ + cos θ = √2 cos θ (θ ≠ 90°), then tan θ equals:", "√2 − 1", [["√2 + 1", "sin θ = (√2 − 1) cos θ."], ["1", "That would need √2 = 2."], ["1/√2", "Divide both sides by cos θ correctly."]],
+    ["sin θ = √2 cos θ − cos θ = (√2 − 1) cos θ.", "tan θ = √2 − 1."], "Divide by cos θ to get tan θ.");
+  Q(MA, "Introduction to Trigonometry", Md, "The value of (sin 30° + cos 60°) − (sin 60° + cos 30°)·(1/√3) is:", "0", [["1", "sin 30° + cos 60° = 1; (√3/2 + √3/2)/√3 = 1."], ["2", "Subtract the two parts."], ["√3", "Multiply by 1/√3."]],
+    ["sin 30° + cos 60° = 1/2 + 1/2 = 1.", "(sin 60° + cos 30°)/√3 = √3/√3 = 1.", "1 − 1 = 0."], "Learn the standard-angle table.");
+  Q(MA, "Introduction to Trigonometry", H, "(1 + tan²A)/(1 + cot²A) is equal to:", "tan²A", [["cot²A", "sec²A/cosec²A = sin²A/cos²A."], ["sec²A", "Divide by 1 + cot²A = cosec²A."], ["1", "Only when A = 45°."]],
+    ["1 + tan²A = sec²A, 1 + cot²A = cosec²A.", "sec²A/cosec²A = sin²A/cos²A = tan²A."], "Use the Pythagorean identities first.");
+  Q(MA, "Some Applications of Trigonometry", H, "From the top of a 60 m high tower, the angles of depression of the top and bottom of a building are 30° and 60°. The height of the building is:", "40 m", [["20 m", "That's the difference in heights."], ["30 m", "Distance = 60/√3 = 20√3; difference = 20√3 × tan 30° = 20 m."], ["45 m", "Recheck with tan 30° = 1/√3."]],
+    ["Horizontal distance d = 60/tan 60° = 20√3 m.", "Drop to the top of the building = d tan 30° = 20 m.", "Building height = 60 − 20 = 40 m."], "Find the horizontal distance first using the larger angle.");
+  Q(MA, "Some Applications of Trigonometry", Md, "The shadow of a tower is √3 times its height. The angle of elevation of the sun is:", "30°", [["60°", "tan θ = h/(√3 h) = 1/√3."], ["45°", "That needs shadow = height."], ["90°", "Then there would be no shadow."]],
+    ["tan θ = height/shadow = 1/√3.", "θ = 30°."], "tan(elevation) = height/shadow.");
+
+  // ===== Areas related to circles / Surface areas and volumes =====
+  T(MA, "Areas Related to Circles", H, 6, () => { const r = pick([7, 14, 21, 28]), th = pick([30, 45, 60, 90, 120]); const ar = 22 / 7 * r * r * th / 360, arc = 2 * 22 / 7 * r * th / 360; 
+    const P = arc + 2 * r; const f = x => (Math.round(x * 100) / 100).toString();
+    return {q: `The perimeter of a sector of angle ${th}° in a circle of radius ${r} cm is (π = 22/7):`, a: f(P) + " cm",
+      w: [[f(arc) + " cm", "Add the two radii to the arc."], [f(ar) + " cm", "That's the area (cm²), not the perimeter."], [f(arc + r) + " cm", "A sector has two radii."]],
+      s: [`Arc = 2πr × θ/360 = ${f(arc)} cm.`, `Perimeter = arc + 2r = ${f(arc)} + ${2 * r} = ${f(P)} cm.`], r: "Sector perimeter = arc length + 2r."}; });
+  T(MA, "Surface Areas and Volumes", H, 6, () => { const r = pick([7, 14, 21]), hc = pick([10, 12, 15, 20, 24]);
+    const v = 22 / 7 * r * r * hc + 2 / 3 * 22 / 7 * r ** 3; const f = x => (Math.round(x * 100) / 100).toString();
+    return {q: `A solid is a cylinder of radius ${r} cm and height ${hc} cm with a hemisphere of the same radius on one end. Its volume is (π = 22/7):`, a: f(v) + " cm³",
+      w: [[f(22 / 7 * r * r * hc + 4 / 3 * 22 / 7 * r ** 3) + " cm³", "Use (2/3)πr³ for a hemisphere, not (4/3)πr³."], [f(22 / 7 * r * r * hc) + " cm³", "Add the hemisphere's volume."], [f(22 / 7 * r * r * hc + 1 / 3 * 22 / 7 * r * r * r) + " cm³", "That's a cone, not a hemisphere."]],
+      s: [`Cylinder = πr²h = ${f(22 / 7 * r * r * hc)}.`, `Hemisphere = (2/3)πr³ = ${f(2 / 3 * 22 / 7 * r ** 3)}.`, `Total = ${f(v)} cm³.`], r: "Combined solids: add the volumes of the parts."}; });
+  T(MA, "Surface Areas and Volumes", H, 6, () => { const R = pick([6, 8, 9, 12]), r = pick([1, 2, 3]), Hh = pick([1, 2]); let n = 4 / 3 * R ** 3 / (r * r * Hh); if(Math.abs(n - Math.round(n)) > 1e-9) return null; n = Math.round(n);
+    return {q: `A metallic sphere of radius ${R} cm is melted and recast into small cylinders of radius ${r} cm and height ${Hh} cm. The number of cylinders formed is:`, a: String(n),
+      w: [[String(n * 2), "Volume of sphere uses 4/3, recheck."], [String(Math.round(n * 3 / 4)), "Include the 4/3 factor."], [String(Math.round(R ** 3 / (r * r * Hh))), "π cancels, but 4/3 doesn't."]],
+      s: [`Volume of sphere = (4/3)π × ${R}³.`, `Volume of one cylinder = π × ${r}² × ${Hh}.`, `n = (4/3 × ${R ** 3})/(${r * r * Hh}) = ${n}.`], r: "Recasting keeps the volume the same."}; });
+  Q(MA, "Surface Areas and Volumes", H, "Two cubes each of volume 64 cm³ are joined end to end. The surface area of the resulting cuboid is:", "160 cm²", [["192 cm²", "Joining hides two faces of 16 cm² each."], ["128 cm²", "The cuboid is 8 × 4 × 4: 2(32 + 32 + 16)."], ["96 cm²", "That's one cube's surface area."]],
+    ["Each cube has side 4 cm; the cuboid is 8 × 4 × 4.", "SA = 2(8×4 + 4×4 + 8×4) = 2(32 + 16 + 32) = 160 cm²."], "When solids are joined, the touching faces are no longer on the surface.");
+
+  // ===== Statistics / Probability =====
+  T(MA, "Statistics", H, 6, () => { const w = pick([10, 5, 20]), L0 = pick([0, 10, 20]) * (w / 10); const f = [ri(3, 8), ri(5, 10), ri(8, 15), ri(5, 10), ri(2, 7)]; const N = f.reduce((a, b) => a + b);
+    let cf = 0, i = 0; while(cf + f[i] < N / 2){ cf += f[i]; i++; } const l = L0 + i * w, med = l + (N / 2 - cf) / f[i] * w; if(Math.abs(med * 100 - Math.round(med * 100)) > 1e-6) return null; const g = x => (Math.round(x * 100) / 100).toString();
+    const cls = f.map((_, j) => `${L0 + j * w}–${L0 + (j + 1) * w}`);
+    return {q: `The median of the distribution is: ${cls.map((c, j) => `${c}: ${f[j]}`).join(", ")}`, a: g(med),
+      w: [[g(l + (N / 2) / f[i] * w), "Subtract cf of the class before the median class."], [g(l + (N / 2 - cf) / f[i]), "Multiply by the class width h = " + w + "."], [g(l + w / 2), "That's the class mark, not the median."]],
+      s: [`N = ${N}, N/2 = ${N / 2}.`, `Median class ${cls[i]} (l = ${l}, cf = ${cf}, f = ${f[i]}, h = ${w}).`, `Median = ${l} + (${N / 2} − ${cf})/${f[i]} × ${w} = ${g(med)}.`], r: "Median = l + [(N/2 − cf)/f] × h."}; });
+  Q(MA, "Statistics", Md, "For a moderately skewed distribution, if mode = 24 and mean = 30, the median is approximately:", "28", [["27", "Use 3 Median = Mode + 2 Mean = 84."], ["26", "Median = (24 + 60)/3 = 28."], ["32", "The median lies between mode and mean."]],
+    ["Empirical relation: 3 Median = Mode + 2 Mean.", "3 Median = 24 + 60 = 84 ⇒ Median = 28."], "3 Median = Mode + 2 Mean.");
+  Q(MA, "Statistics", H, "The mean of 5 observations is 15. If the mean of the first three is 14 and of the last three is 17, the third observation is:", "18", [["15", "Sum of all = 75; first three = 42; last three = 51; third = 42 + 51 − 75."], ["17", "The third observation is counted in both groups."], ["16", "Recheck: 42 + 51 = 93, 93 − 75 = 18."]],
+    ["Total = 75; first three = 42; last three = 51.", "The 3rd observation is counted twice: 42 + 51 − 75 = 18."], "Overlap problems: total of the groups − grand total = the shared term.");
+  T(MA, "Probability", H, 6, () => { const r = ri(3, 9), b = ri(3, 9), g = ri(2, 6), N = r + b + g; const fr = (a, c) => { const k = gcd(a, c); return `${a / k}/${c / k}`; };
+    return {q: `A bag has ${r} red, ${b} blue and ${g} green balls. One ball is drawn at random. The probability that it is neither red nor green is:`, a: fr(b, N),
+      w: [[fr(r + g, N), "That's the probability of red or green."], [fr(b, r + g), "Denominator is the total number of balls."], [fr(N - b, N), "\"Neither red nor green\" means blue."]],
+      s: [`Total = ${N}.`, `Neither red nor green = blue = ${b}.`, `P = ${b}/${N}.`], r: "Count favourable outcomes over the total."}; });
+  Q(MA, "Probability", H, "Two dice are thrown together. The probability that the sum of the numbers is a prime number is:", "5/12", [["1/2", "Prime sums 2, 3, 5, 7, 11 occur in 1 + 2 + 4 + 6 + 2 = 15 ways."], ["7/36", "Count all five prime sums, not just one."], ["1/3", "Count all prime sums: 15 of 36."]],
+    ["Prime sums: 2 (1 way), 3 (2), 5 (4), 7 (6), 11 (2).", "Total = 15 of 36 = 5/12."], "List the favourable sums and count outcomes for each.");
+  Q(MA, "Probability", Md, "A card is drawn from a well-shuffled deck of 52 cards. The probability that it is a red face card is:", "3/26", [["3/13", "That's any face card (12/52)."], ["1/26", "There are 6 red face cards."], ["1/2", "That's any red card."]],
+    ["Red face cards: J, Q, K of hearts and diamonds = 6.", "P = 6/52 = 3/26."], "Face cards are J, Q, K: 12 in a deck, 6 of them red.");
+
+  // ===== Real Numbers =====
+  Q(MA, "Real Numbers", H, "If HCF(306, 657) = 9, then LCM(306, 657) is:", "22338", [["2962", "LCM = (306 × 657)/9."], ["201042", "That's the product; divide by the HCF."], ["657", "The LCM must be a multiple of both numbers."]],
+    ["HCF × LCM = product of the two numbers.", "LCM = 306 × 657/9 = 22338."], "For two numbers, HCF × LCM = product.");
+  Q(MA, "Real Numbers", Md, "The smallest number that, when divided by 35, 56 and 91, leaves remainder 7 in each case is:", "3647", [["3640", "Add the remainder 7 to the LCM."], ["3633", "LCM + 7, not − 7."], ["7280", "That's 2 × LCM."]],
+    ["LCM(35, 56, 91) = 3640.", "Required number = 3640 + 7 = 3647."], "Same remainder: LCM + remainder.");
+  Q(MA, "Real Numbers", H, "Which of the following is irrational?", "(2 + √3)(2 − √3) + √5", [["(3 + √2)(3 − √2)", "= 9 − 2 = 7, rational."], ["(√2 + 1)² − 2√2", "= 3, rational."], ["√(16/9)", "= 4/3, rational."]],
+    ["(2 + √3)(2 − √3) = 1, so the expression is 1 + √5.", "1 + √5 is irrational because √5 is irrational."], "Simplify fully before deciding; rational + irrational is irrational.");
+
+  // ===== Science: conceptual Medium/Hard questions (competency style) =====
+  const CR = "Chemical Reactions and Equations", AB = "Acids, Bases and Salts", CC = "Carbon and its Compounds", LP = "Life Processes", CO = "Control and Coordination", RP = "How do Organisms Reproduce?", HE = "Heredity", EYE = "The Human Eye and the Colourful World", MG = "Magnetic Effects of Electric Current", EN = "Our Environment", EL = "Electricity", LT = "Light – Reflection and Refraction", ME = "Metals and Non-metals";
+  const S = (c, d, q, ok, w, steps, rule) => Q(SC, c, d, q, ok, w, steps, rule);
+  S(CR, H, "When a copper wire is dipped in silver nitrate solution, the solution turns blue after some time because:", "Copper displaces silver and Cu²⁺ ions form", [["Silver displaces copper", "Silver is less reactive than copper; it can't displace it."], ["Copper dissolves in water", "Copper doesn't dissolve in water."], ["Silver nitrate decomposes in light", "That gives a grey deposit, not a blue solution."]],
+    ["Cu is more reactive than Ag.", "Cu + 2AgNO₃ → Cu(NO₃)₂ + 2Ag; Cu²⁺ ions give the blue colour."], "A more reactive metal displaces a less reactive one from its salt solution.");
+  S(CR, H, "In the reaction 2PbO + C → 2Pb + CO₂, which statement is correct?", "PbO is reduced and C is oxidised", [["PbO is oxidised and C is reduced", "PbO loses oxygen, so it's reduced."], ["Both are reduced", "Carbon gains oxygen, so it's oxidised."], ["It is not a redox reaction", "Oxygen is transferred, so it is a redox reaction."]],
+    ["PbO loses oxygen → reduced.", "C gains oxygen → oxidised."], "Gain of oxygen = oxidation; loss of oxygen = reduction.");
+  S(CR, Md, "Why is respiration considered an exothermic reaction?", "Glucose is oxidised and energy is released", [["Energy is absorbed from food", "Respiration releases energy."], ["Oxygen is reduced to ozone", "Oxygen forms water, not ozone."], ["It occurs only in sunlight", "Respiration goes on day and night."]],
+    ["C₆H₁₂O₆ + 6O₂ → 6CO₂ + 6H₂O + energy.", "Energy is released, so it is exothermic."], "Exothermic = heat released.");
+  S(CR, H, "Ferrous sulphate crystals on heating change colour and smell of burning sulphur is noticed. The reaction is:", "Thermal decomposition giving Fe₂O₃, SO₂ and SO₃", [["Combination giving FeSO₄·7H₂O", "Heating breaks the compound up, it doesn't combine."], ["Displacement of iron by sulphur", "No element displaces another here."], ["Photochemical decomposition", "Heat, not light, causes it."]],
+    ["2FeSO₄ → Fe₂O₃ + SO₂ + SO₃ on heating.", "One reactant gives several products ⇒ decomposition by heat."], "One reactant → two or more products is decomposition.");
+  S(CR, Md, "Which change prevents rancidity of chips in packets?", "Flushing the packet with nitrogen", [["Adding more oil", "More oil gives more to oxidise."], ["Keeping them in sunlight", "Light speeds up oxidation."], ["Flushing with oxygen", "Oxygen causes rancidity."]],
+    ["Rancidity is the oxidation of fats and oils.", "Nitrogen keeps oxygen out, so oxidation is slowed."], "Remove oxygen to slow oxidation.");
+  S(AB, H, "A solution turns red litmus blue. Its pH is likely to be:", "10", [["1", "pH 1 is strongly acidic; it turns blue litmus red."], ["4", "pH 4 is acidic."], ["7", "Neutral solutions don't change litmus."]],
+    ["Red → blue means a base.", "Bases have pH > 7; 10 fits."], "pH < 7 acid, 7 neutral, > 7 base.");
+  S(AB, H, "Why does dry HCl gas not change the colour of dry blue litmus paper?", "H⁺ ions form only in the presence of water", [["HCl is a base when dry", "HCl is an acid; it needs water to ionise."], ["Litmus works only with liquids", "It's about ionisation, not physical state."], ["HCl is a weak acid", "HCl is a strong acid in water."]],
+    ["Acidic behaviour needs H⁺ (H₃O⁺) ions.", "Without water, HCl doesn't ionise, so litmus doesn't change."], "Acids show their properties only in aqueous solution.");
+  S(AB, H, "Plaster of Paris should be stored in a moisture-proof container because:", "It absorbs water and sets into hard gypsum", [["It turns into bleaching powder", "That needs chlorine."], ["It decomposes into CaO", "It needs strong heating for that."], ["It becomes acidic", "Water converts it to gypsum, not an acid."]],
+    ["CaSO₄·½H₂O + 1½H₂O → CaSO₄·2H₂O (gypsum).", "This hard mass is useless as a powder."], "PoP + water → gypsum (sets hard).");
+  S(AB, Md, "Which salt gives a basic solution in water?", "Sodium carbonate", [["Sodium chloride", "Salt of strong acid + strong base: neutral."], ["Ammonium chloride", "Strong acid + weak base: acidic."], ["Potassium sulphate", "Strong acid + strong base: neutral."]],
+    ["Na₂CO₃ comes from NaOH (strong base) and H₂CO₃ (weak acid).", "Such salts give basic solutions."], "Strong base + weak acid salt → basic solution.");
+  S(AB, H, "During the preparation of HCl gas on a humid day, the gas is passed through a guard tube containing calcium chloride. The role of CaCl₂ is to:", "Absorb moisture from the gas", [["React with HCl", "CaCl₂ doesn't react with HCl."], ["Convert HCl into Cl₂", "No oxidation takes place."], ["Neutralise the gas", "CaCl₂ is a neutral salt."]],
+    ["Anhydrous CaCl₂ is a drying agent.", "It removes water vapour so the gas stays dry."], "CaCl₂ is a common drying agent.");
+  S(CC, H, "The number of covalent bonds in a molecule of propane (C₃H₈) is:", "10", [["8", "Count C–C bonds too: 2 C–C + 8 C–H."], ["11", "That's butane-like counting."], ["3", "That's just the number of carbons."]],
+    ["C–H bonds = 8, C–C bonds = 2.", "Total = 10."], "For CₙH₂ₙ₊₂: bonds = 3n + 1.");
+  S(CC, H, "Which pair belongs to the same homologous series?", "C₂H₆ and C₄H₁₀", [["C₂H₄ and C₂H₆", "Alkene and alkane: different series."], ["CH₃OH and CH₃COOH", "Different functional groups."], ["C₃H₄ and C₃H₈", "Alkyne and alkane."]],
+    ["Both C₂H₆ and C₄H₁₀ fit CₙH₂ₙ₊₂ (alkanes).", "They differ by 2 × CH₂."], "Homologues share a general formula and differ by CH₂ units.");
+  S(CC, Md, "Soaps do not work well in hard water because:", "They form insoluble scum with Ca²⁺ and Mg²⁺ ions", [["Hard water is acidic", "Hardness is due to Ca/Mg salts, not acidity."], ["Soap dissolves too fast", "The problem is precipitation."], ["Hard water has no ions", "It has many Ca²⁺ and Mg²⁺ ions."]],
+    ["Soap anions combine with Ca²⁺/Mg²⁺.", "An insoluble scum forms and the soap is wasted."], "Detergents don't form scum; soaps do.");
+  S(CC, H, "Ethanol is heated with excess concentrated H₂SO₄ at 443 K. The product and the role of the acid are:", "Ethene; dehydrating agent", [["Ethanoic acid; oxidising agent", "Oxidation needs alkaline KMnO₄ or acidified K₂Cr₂O₇."], ["Ethyl ethanoate; catalyst", "Esterification needs ethanoic acid."], ["Ethane; reducing agent", "Hydrogenation is needed for ethane."]],
+    ["Hot conc. H₂SO₄ removes water from ethanol.", "CH₃CH₂OH → CH₂=CH₂ + H₂O."], "Conc. H₂SO₄ at 443 K dehydrates ethanol to ethene.");
+  S(CC, Md, "A yellow flame with black smoke when a compound burns indicates:", "An unsaturated compound burning incompletely", [["A saturated compound burning in plenty of air", "That gives a clean blue flame."], ["Pure carbon dioxide", "CO₂ doesn't burn."], ["Complete combustion of methane", "Methane gives a blue flame."]],
+    ["Unsaturated hydrocarbons have more carbon per hydrogen.", "They burn with a sooty yellow flame."], "Sooty flame → unsaturated/incomplete combustion.");
+  S(LP, H, "The correct sequence of events in aerobic respiration in the mitochondria after glycolysis is:", "Pyruvate → CO₂ + H₂O + energy", [["Pyruvate → ethanol + CO₂", "That's anaerobic (yeast)."], ["Pyruvate → lactic acid", "That happens in muscles lacking oxygen."], ["Glucose → pyruvate", "That's glycolysis, in the cytoplasm."]],
+    ["Glucose → pyruvate in the cytoplasm.", "In mitochondria, with oxygen, pyruvate → CO₂ + H₂O + much energy."], "Aerobic = mitochondria = CO₂ + water.");
+  S(LP, H, "Why is the rate of breathing in aquatic organisms faster than in terrestrial organisms?", "Water holds much less dissolved oxygen than air", [["Water has more oxygen", "It has much less."], ["Aquatic animals are larger", "Size is not the reason."], ["They don't need oxygen", "They do need oxygen."]],
+    ["Dissolved oxygen in water is low.", "So aquatic animals breathe faster to get enough."], "Less oxygen available → faster breathing.");
+  S(LP, Md, "Which part of the nephron is the site of filtration?", "Glomerulus in Bowman's capsule", [["Loop of Henle", "It reabsorbs water and salts."], ["Collecting duct", "It collects urine."], ["Tubule", "Reabsorption happens in the tubule."]],
+    ["Blood is filtered in the glomerulus.", "The filtrate enters Bowman's capsule."], "Filtration → glomerulus; reabsorption → tubule.");
+  S(LP, H, "Double circulation in humans means that blood:", "Passes through the heart twice in one complete cycle", [["Flows in two directions in a vessel", "Valves keep flow one-way."], ["Has two types of cells", "That's not circulation."], ["Goes to the lungs twice", "It goes to the lungs once per cycle."]],
+    ["Heart → body → heart (systemic).", "Heart → lungs → heart (pulmonary)."], "Double circulation keeps oxygenated and deoxygenated blood separate.");
+  S(LP, H, "Guard cells swell when water flows into them. This causes the stomatal pore to:", "Open", [["Close", "Swollen guard cells bend outward and open the pore."], ["Stay unchanged", "Turgor changes control the pore."], ["Fill with water", "The pore opens for gas exchange."]],
+    ["Water entry makes guard cells turgid.", "They curve and the pore opens."], "Turgid guard cells → open stomata.");
+  S(CO, H, "A potted plant kept horizontally shows its shoot bending upward after a few days. This is due to:", "Negative geotropism of the shoot", [["Positive phototropism of the root", "Roots grow towards gravity."], ["Thigmotropism", "That's response to touch."], ["Positive geotropism of the shoot", "Shoots grow away from gravity."]],
+    ["Auxin collects on the lower side of the shoot.", "The lower side grows faster, bending the shoot upward."], "Shoots: negatively geotropic; roots: positively geotropic.");
+  S(CO, Md, "Which gland secretes a hormone that regulates blood sugar?", "Pancreas", [["Thyroid", "Thyroxine controls metabolism."], ["Adrenal", "Adrenaline prepares for emergencies."], ["Pituitary", "It secretes growth hormone."]],
+    ["Pancreas secretes insulin.", "Insulin lowers blood sugar."], "Insulin is from the pancreas.");
+  S(CO, H, "In a reflex arc, the correct path of the impulse is:", "Receptor → sensory neuron → spinal cord → motor neuron → effector", [["Receptor → motor neuron → spinal cord → sensory neuron → effector", "Sensory comes before motor."], ["Brain → spinal cord → receptor → effector", "Reflexes are mainly spinal."], ["Effector → spinal cord → receptor", "The response is at the effector at the end."]],
+    ["The stimulus is picked up by a receptor.", "It travels via sensory neuron to the spinal cord, then motor neuron to the effector."], "Reflex: receptor → sensory → relay → motor → effector.");
+  S(CO, H, "Iodised salt is advised because iodine is needed to make:", "Thyroxine", [["Insulin", "Insulin is a protein, no iodine."], ["Adrenaline", "No iodine in adrenaline."], ["Growth hormone", "No iodine in it."]],
+    ["Thyroid uses iodine to make thyroxine.", "Lack of it causes goitre."], "Iodine → thyroxine; deficiency → goitre.");
+  S(RP, H, "In a flower, the correct sequence after pollination is:", "Pollen tube growth → fertilisation → ovary becomes fruit", [["Fertilisation → pollen tube growth → seed", "The pollen tube must grow first."], ["Ovary becomes fruit → fertilisation", "Fruit forms after fertilisation."], ["Seed → ovule → fertilisation", "The order is reversed."]],
+    ["Pollen grows a tube to the ovule.", "Fertilisation forms a zygote; ovule → seed, ovary → fruit."], "Fruit and seed form after fertilisation.");
+  S(RP, Md, "Which method of reproduction in Hydra involves a bud forming on the body?", "Budding", [["Fission", "Hydra doesn't split into two."], ["Fragmentation", "That's Spirogyra."], ["Spore formation", "That's Rhizopus."]],
+    ["A small bud grows out of Hydra's body.", "It detaches to form a new individual."], "Hydra: budding (also regeneration).");
+  S(RP, H, "Using a condom prevents STDs and pregnancy because it:", "Blocks sperm and body fluids from passing between partners", [["Kills the egg", "It's a mechanical barrier."], ["Stops ovulation", "Hormonal pills stop ovulation."], ["Blocks the fallopian tube", "That's tubectomy."]],
+    ["A condom is a mechanical barrier.", "No sperm or infected fluid passes across."], "Barrier methods block gamete meeting and infection.");
+  S(RP, H, "Why does the number of chromosomes stay constant from generation to generation?", "Gametes have half the chromosome number", [["Gametes have double the number", "Then numbers would double each generation."], ["Zygote loses chromosomes", "The zygote restores the full number."], ["Only one parent gives chromosomes", "Both contribute equally."]],
+    ["Gametes form by meiosis and are haploid.", "Fusion restores the diploid number."], "Haploid gametes + fertilisation keep the number constant.");
+  S(HE, H, "In Mendel's cross of tall (TT) and dwarf (tt) pea plants, the ratio of tall to dwarf in F₂ is:", "3 : 1", [["1 : 1", "That's a test cross."], ["1 : 2 : 1", "That's the genotypic ratio."], ["All tall", "That's F₁."]],
+    ["F₁: Tt (all tall).", "F₂: TT, 2Tt, tt → 3 tall : 1 dwarf."], "Monohybrid F₂ phenotype ratio is 3 : 1.");
+  S(HE, H, "A child gets a Y chromosome from the father. The child will be:", "A boy", [["A girl", "XX gives a girl; XY gives a boy."], ["Either, depending on the mother", "Mother always gives X."], ["Neither", "The X from the mother + Y gives a boy."]],
+    ["Mother gives X; father gives X or Y.", "X + Y = XY = boy."], "Sex of a child depends on the father's chromosome.");
+  S(HE, H, "In a dihybrid cross (RRYY × rryy), the number of phenotypes in F₂ is:", "4", [["2", "Two traits give 2 × 2 = 4 phenotypes."], ["9", "9 is the number of genotypes."], ["16", "16 is the number of combinations."]],
+    ["F₂ ratio 9 : 3 : 3 : 1.", "That's 4 phenotypes."], "Dihybrid F₂: 9 : 3 : 3 : 1.");
+  S(EYE, H, "A person can see distant objects clearly but not nearby ones. The defect and correction are:", "Hypermetropia; convex lens", [["Myopia; concave lens", "Myopes can't see far."], ["Hypermetropia; concave lens", "Hypermetropia needs a converging lens."], ["Presbyopia; concave lens", "Presbyopia is corrected with convex or bifocal lenses."]],
+    ["Near point is farther than 25 cm.", "A convex lens brings near objects into focus."], "Far-sighted → convex; near-sighted → concave.");
+  S(EYE, H, "The sky looks blue because:", "Shorter (blue) wavelengths are scattered more by air molecules", [["Blue light is absorbed by air", "It's scattered, not absorbed."], ["Red light is scattered most", "Red scatters least."], ["The sea reflects blue light", "The sky is blue even far from the sea."]],
+    ["Scattering by tiny particles ∝ 1/λ⁴.", "Blue is scattered much more than red."], "Smaller wavelength → more scattering.");
+  S(EYE, Md, "Danger signals are red because red light:", "Is scattered least and travels farthest in fog", [["Is scattered most", "Red is scattered least."], ["Has the shortest wavelength", "It has the longest visible wavelength."], ["Is absorbed by smoke", "It passes through best."]],
+    ["Red has the longest wavelength.", "It is scattered least and seen from far."], "Long wavelength → less scattering.");
+  S(MG, H, "The direction of force on a current-carrying conductor in a magnetic field is given by:", "Fleming's left-hand rule", [["Fleming's right-hand rule", "That gives induced current direction."], ["Right-hand thumb rule", "That gives the field around a wire."], ["Snell's law", "That's for refraction."]],
+    ["Force on a conductor (motor effect) uses the left hand.", "Forefinger field, middle finger current, thumb force."], "Left hand → motor; right hand → generator.");
+  S(MG, H, "The magnetic field inside a long solenoid carrying current is:", "Uniform and along the axis", [["Zero", "It's strongest inside."], ["Circular around the solenoid", "Inside it's straight, parallel lines."], ["Strongest at the ends", "It's uniform inside."]],
+    ["Field lines inside are parallel and equally spaced.", "So the field is uniform."], "Solenoid inside: uniform field.");
+  S(MG, Md, "Which safety device melts and breaks the circuit when too much current flows?", "Fuse", [["Earth wire", "It carries leakage current to the ground."], ["Switch", "It's operated by hand."], ["Ammeter", "It measures current."]],
+    ["A fuse wire has a low melting point.", "Heavy current melts it and stops the flow."], "A fuse protects against overloading and short circuits.");
+  S(EN, H, "If a frog gets 100 J from insects, how much energy does the snake that eats the frog get (10% law)?", "10 J", [["100 J", "Only 10% passes up each level."], ["1 J", "That's two levels up."], ["90 J", "90% is lost, 10% passes on."]],
+    ["10% of 100 J = 10 J.", "The rest is used or lost as heat."], "Only about 10% of energy passes to the next trophic level.");
+  S(EN, H, "Which statement about ozone depletion is correct?", "CFCs release chlorine that breaks down ozone", [["CO₂ is the main cause", "CO₂ causes global warming."], ["Ozone protects from infrared rays", "It absorbs UV rays."], ["Ozone is made in the troposphere only", "The ozone layer is in the stratosphere."]],
+    ["UV breaks CFCs, releasing Cl atoms.", "Cl destroys O₃ molecules."], "CFCs → ozone depletion.");
+  S(EN, Md, "Biological magnification means that harmful chemicals:", "Increase in concentration up the food chain", [["Decrease up the food chain", "They accumulate and increase."], ["Are broken down by producers", "They are non-biodegradable."], ["Stay only in soil", "They enter food chains."]],
+    ["Non-biodegradable chemicals are not excreted.", "They build up at each level."], "Top consumers have the highest concentration.");
+  S(EL, H, "Two resistors of 6 Ω each are first joined in series and then in parallel. The ratio of the equivalent resistances (series : parallel) is:", "4 : 1", [["2 : 1", "Series 12 Ω, parallel 3 Ω: 12 : 3 = 4 : 1."], ["1 : 4", "Series is larger."], ["1 : 1", "They differ."]],
+    ["Series: 6 + 6 = 12 Ω.", "Parallel: 6 × 6/12 = 3 Ω.", "Ratio = 12 : 3 = 4 : 1."], "For n equal resistors, series : parallel = n² : 1.");
+  S(EL, H, "A wire of resistance R is stretched to double its length (volume constant). Its new resistance is:", "4R", [["2R", "Area halves too, giving 2 × 2 = 4."], ["R/2", "Stretching increases resistance."], ["R", "Length and area both change."]],
+    ["R ∝ L/A; L doubles, A halves.", "New R = 2 × 2 × R = 4R."], "Stretching n times (volume fixed) → resistance × n².");
+  S(LT, H, "An object is placed at the centre of curvature of a concave mirror. The image is:", "Real, inverted, same size, at C", [["Virtual, erect, magnified", "That's for an object inside F."], ["Real, inverted, diminished, between F and C", "That's for an object beyond C."], ["At infinity", "That's for an object at F."]],
+    ["Object at C → image at C.", "It is real, inverted and the same size."], "Object at C gives an image at C.");
+  S(LT, H, "The refractive index of glass is 1.5. The speed of light in glass is:", "2 × 10⁸ m/s", [["3 × 10⁸ m/s", "That's in vacuum."], ["4.5 × 10⁸ m/s", "Divide, don't multiply."], ["1.5 × 10⁸ m/s", "3 × 10⁸/1.5 = 2 × 10⁸."]],
+    ["n = c/v ⇒ v = c/n.", "v = 3 × 10⁸/1.5 = 2 × 10⁸ m/s."], "v = c/n.");
+  S(ME, H, "Aluminium is more reactive than iron, yet it hardly corrodes because:", "A thin protective oxide layer forms on its surface", [["It doesn't react with oxygen", "It reacts but the layer protects it."], ["It's a noble metal", "Aluminium is reactive."], ["It's always painted", "No painting is needed."]],
+    ["Al forms Al₂O₃ quickly in air.", "This layer stops further corrosion."], "Oxide layers can protect reactive metals.");
+  S(ME, H, "Which metal can be extracted from its oxide by heating with carbon?", "Zinc", [["Sodium", "Too reactive; needs electrolysis."], ["Aluminium", "Needs electrolysis."], ["Calcium", "Too reactive for carbon."]],
+    ["Metals in the middle of the activity series are reduced by carbon.", "ZnO + C → Zn + CO."], "Middle metals: carbon reduction; top metals: electrolysis.");
+  S(ME, Md, "An element forms an oxide that turns blue litmus red. The element is likely a:", "Non-metal", [["Metal", "Metal oxides are basic."], ["Noble gas", "Noble gases rarely form oxides."], ["Metalloid always", "Acidic oxides are typical of non-metals."]],
+    ["Acidic oxide → turns blue litmus red.", "Non-metals form acidic oxides."], "Metal oxides basic; non-metal oxides acidic.");
+}
+
+// ---- Class 12 numerical templates (NCERT pattern, Medium/Hard; weighted to high-mark chapters) ----
+function EXTRA12(h){
+  const {T, ri, pick, shuf, gcd, M, num, frac, sci} = h;
+  const H = "Hard", Md = "Medium";
+  const root = n => { let k = 1, m = n; for(let d = 2; d * d <= m; d++) while(m % (d * d) === 0){ m /= d * d; k *= d; } return m === 1 ? String(k) : (k === 1 ? "" : k) + "√" + m; };
+  const vec = (a, b, c) => { let s = "", f = true; [[a, "î"], [b, "ĵ"], [c, "k̂"]].forEach(([k, u]) => { if(!k) return; s += (k < 0 ? (f ? "−" : " − ") : (f ? "" : " + ")) + (Math.abs(k) === 1 ? "" : Math.abs(k)) + u; f = false; }); return s || "0"; };
+  const m2 = m => `[${m[0][0]}, ${m[0][1]}; ${m[1][0]}, ${m[1][1]}]`.replace(/-/g, "−");
+  const C = (n, k) => { let r = 1; for(let i = 1; i <= k; i++) r = r * (n - k + i) / i; return Math.round(r); };
+  const P = "Physics", CH = "Chemistry", MA = "Maths";
+  const fpi = (n, d) => { const g = gcd(n, d); n /= g; d /= g; return d === 1 ? `${n}/π` : `${n}/(${d}π)`; };
+
+  // ===== MATHS: Integrals =====
+  T(MA, "Integrals", H, 4, () => { const k = ri(1, 4); return {q: `Evaluate ∫₀^${k} 2x/(1 + x²) dx.`, a: `log ${1 + k * k}`,
+    w: [[`½ log ${1 + k * k}`, "The numerator 2x is exactly the derivative of 1 + x², so there is no ½."], [`2 log ${1 + k * k}`, "Put t = 1 + x², dt = 2x dx; no extra factor 2 appears."], [`tan⁻¹ ${k}`, "tan⁻¹ comes from ∫1/(1 + x²) dx, not ∫2x/(1 + x²) dx."]],
+    s: ["Let t = 1 + x², so dt = 2x dx.", `When x = 0, t = 1; when x = ${k}, t = ${1 + k * k}.`, `∫₁^${1 + k * k} dt/t = [log t]₁^${1 + k * k} = log ${1 + k * k} − log 1 = log ${1 + k * k}.`], r: "∫ f′(x)/f(x) dx = log|f(x)| + C."}; });
+  T(MA, "Integrals", H, 3, () => { const a = ri(1, 3); const val = a === 1 ? "1" : `${a - 1}e${a === 2 ? "²" : "³"} + 1`;
+    return {q: `Evaluate ∫₀^${a} x eˣ dx.`, a: val, w: [[`${a + 1}e${a === 1 ? "" : a === 2 ? "²" : "³"} − 1`, "The sign is wrong: integration by parts gives x eˣ − eˣ, not x eˣ + eˣ."], [`${a === 1 ? "" : a}e${a === 1 ? "" : a === 2 ? "²" : "³"}`, "You stopped after the first term x eˣ and did not subtract ∫eˣ dx."], [`${a - 1 || ""}e${a === 1 ? "" : a === 2 ? "²" : "³"}`.replace(/^e/, a === 1 ? "0 · e" : "e"), "The lower limit gives −(0 − 1) = +1, which is missing."]],
+      s: ["Use integration by parts with u = x, dv = eˣ dx.", "∫x eˣ dx = x eˣ − ∫eˣ dx = eˣ(x − 1).", `Apply the limits: e^${a}(${a} − 1) − e⁰(0 − 1) = ${val}.`], r: "ILATE: take the algebraic function x as u."}; });
+  T(MA, "Integrals", H, 5, () => { const a = ri(1, 5); return {q: `Evaluate ∫₀^${a} dx/(x² + ${a * a}).`, a: `π/${4 * a}`,
+    w: [[`π/${2 * a}`, `tan⁻¹(${a}/${a}) = tan⁻¹ 1 = π/4, not π/2.`], ["π/4", `You forgot the factor 1/${a} in (1/a) tan⁻¹(x/a).`], [`${a === 1 ? "" : a}π/4`, "The factor is 1/a, not a."]],
+    s: [`∫dx/(x² + a²) = (1/a) tan⁻¹(x/a), here a = ${a}.`, `= (1/${a})[tan⁻¹ 1 − tan⁻¹ 0] = (1/${a})(π/4) = π/${4 * a}.`], r: "∫dx/(x² + a²) = (1/a) tan⁻¹(x/a) + C."}; });
+  T(MA, "Integrals", H, 3, () => { const k = ri(1, 3), nume = 2 * (1 + k), den = 2 + k, g = gcd(nume, den), r = `${nume / g}/${den / g}`;
+    return {q: `Evaluate ∫₁² dx / [x(x + ${k})].`, a: (k === 1 ? "" : `(1/${k}) `) + `log(${r})`,
+      w: [[`log(${r})${k === 1 ? " + 1" : ""}`.replace(" + 1", "") === `log(${r})` && k === 1 ? `2 log(${r})` : `log(${r})`, `Partial fractions give 1/x(x + ${k}) = (1/${k})[1/x − 1/(x + ${k})], so the factor 1/${k} matters.`], [`(1/${k}) log(${den}/${1 + k})`, "Check the limits: substitute x = 2 and x = 1 into log[x/(x + k)] and subtract."], [`${k === 1 ? "" : `(1/${k}) `}log(${(1 + k)}/${2})`, "The value of log[x/(x + k)] at x = 1 is subtracted, not added."]],
+      s: [`Partial fractions: 1/[x(x + ${k})] = (1/${k})[1/x − 1/(x + ${k})].`, `Integrate: (1/${k}) log[x/(x + ${k})].`, `At x = 2: log(2/${2 + k}); at x = 1: log(1/${1 + k}).`, `Difference: (1/${k}) log[2(${1 + k})/${2 + k}] = ${k === 1 ? "" : `(1/${k}) `}log(${r}).`], r: "Split rational functions with distinct linear factors into partial fractions."}; });
+  T(MA, "Integrals", H, 4, () => { const a = ri(1, 4), c = ri(2, 6); return {q: `Evaluate ∫ from −${a} to ${a} of (x³ + x cos x + ${c}) dx.`, a: String(2 * a * c),
+    w: [["0", "Only the odd parts (x³ and x cos x) vanish; the constant gives 2ac."], [String(a * c), "The interval length is 2a, not a."], [String(2 * a * c + a ** 4 / 2), "x³ is odd, so its integral over [−a, a] is zero."]],
+    s: ["x³ and x cos x are odd functions: their integrals over [−a, a] are 0.", `The constant ${c} is even: ∫₋${a}^${a} ${c} dx = ${c} × ${2 * a} = ${2 * a * c}.`], r: "∫₋ₐᵃ f = 0 if f is odd; = 2∫₀ᵃ f if f is even."}; });
+  const EF = [["sin x + cos x", "eˣ sin x + C"], ["tan x + sec²x", "eˣ tan x + C"], ["1/x − 1/x²", "eˣ/x + C"], ["log x + 1/x", "eˣ log x + C"]];
+  EF.forEach(([f, a]) => T(MA, "Integrals", H, 1, () => ({q: `∫ eˣ (${f}) dx equals:`, a, w: EF.filter(r => r[1] !== a).map(r => [r[1], "Write the bracket as f(x) + f′(x) and pick the f(x) whose derivative is the second term."]),
+    s: [`The bracket has the form f(x) + f′(x) with f(x) = ${a.replace("eˣ", "").replace(" + C", "").replace(/^\//, "1/").trim() || "1"}.`, "∫eˣ[f(x) + f′(x)] dx = eˣ f(x) + C.", `So the answer is ${a}.`], r: "∫eˣ[f(x) + f′(x)] dx = eˣ f(x) + C."})));
+  // ===== MATHS: Application of Integrals =====
+  T(MA, "Application of Integrals", H, 6, () => { const r1 = ri(-3, 1), r2 = ri(r1 + 1, 4), b = r1 + r2, c = -r1 * r2, d = r2 - r1, A = frac(d ** 3, 6);
+    const line = `y = ${b === 0 ? "" : (b === 1 ? "" : b === -1 ? "−" : M(b))}${b === 0 ? "" : "x"}${c === 0 ? (b === 0 ? "0" : "") : (b === 0 ? M(c) : (c > 0 ? " + " + c : " − " + Math.abs(c)))}`;
+    return {q: `Find the area of the region enclosed by the parabola y = x² and the line ${line}.`, a: A + " sq. units",
+      w: [[frac(d ** 3, 3) + " sq. units", "That is ∫x² dx alone; subtract the parabola from the line."], [frac(d ** 2, 2) + " sq. units", "Integrate (line − parabola) between the intersection points; don't just use base × height."], [frac(d ** 3, 2) + " sq. units", "Check the integral of (r₂ − r₁)-type cubic: the result is (r₂ − r₁)³/6."]],
+      s: [`Intersections: x² = ${line.slice(4)} ⇒ x = ${M(r1)} and x = ${r2}.`, `Area = ∫ from ${M(r1)} to ${r2} of [(${line.slice(4)}) − x²] dx.`, `For a line cutting y = x² at r₁ and r₂ this equals (r₂ − r₁)³/6 = ${d}³/6 = ${A}.`], r: "Area between curves = ∫(upper − lower) dx between the intersection points."}; });
+  T(MA, "Application of Integrals", H, 4, () => { const a = ri(1, 3), m = pick([1, 2]), A = frac(8 * a * a, 3 * m ** 3);
+    return {q: `Find the area enclosed between the parabola y² = ${4 * a}x and the line y = ${m === 1 ? "" : m}x.`, a: A + " sq. units",
+      w: [[frac(16 * a * a, 3 * m ** 3) + " sq. units", "You doubled the area; the region lies only above the x-axis between the curves."], [frac(4 * a * a, 3 * m ** 3) + " sq. units", "Recheck the intersection point x = 4a/m²."], [frac(8 * a * a, 3 * m) + " sq. units", "The m in the answer is cubed: area = 8a²/(3m³)."]],
+      s: [`Intersection: m²x² = 4ax ⇒ x = 0 and x = ${frac(4 * a, m * m)}.`, `Area = ∫₀^${frac(4 * a, m * m)} (√(${4 * a}x) − ${m === 1 ? "" : m}x) dx.`, `This works out to 8a²/(3m³) = ${A}.`], r: "Find the limits from the intersection, then integrate (upper − lower)."}; });
+  // ===== MATHS: Application of Derivatives =====
+  T(MA, "Application of Derivatives", H, 5, () => { const a = 6 * ri(1, 5), x = a / 6, V = (a - 2 * x) ** 2 * x;
+    return {q: `Equal squares are cut from the corners of a square sheet of side ${a} cm and the sides are folded up to make an open box. The maximum volume of the box is:`, a: V + " cm³",
+      w: [[(a - 2 * (a / 4)) ** 2 * (a / 4) + " cm³", "That uses x = a/4. Solve dV/dx = 0: x = a/6."], [a ** 3 / 27 + " cm³", "Use V = (a − 2x)²x, not a³/27."], [(a - x) ** 2 * x + " cm³", "Both ends are cut, so the base side is a − 2x."]],
+      s: ["Let the cut side be x. V = (a − 2x)²·x.", "dV/dx = (a − 2x)(a − 6x) = 0 ⇒ x = a/6 (x = a/2 gives zero volume).", `x = ${x} cm, base side = ${a - 2 * x} cm.`, `V = ${a - 2 * x}² × ${x} = ${V} cm³; V″ < 0 there, so it is a maximum.`], r: "For maxima: f′(x) = 0 and f″(x) < 0."}; });
+  T(MA, "Application of Derivatives", H, 6, () => { const R = pick([12, 18, 24, 36]), Hh = ri(2, 4), den = 36 * Hh * Hh, g = gcd(R, den);
+    return {q: `Sand pours at ${R} cm³/s and forms a cone whose height is always one-sixth of its base radius. How fast is the height increasing when the height is ${Hh} cm?`, a: fpi(R, den) + " cm/s",
+      w: [[fpi(R, 12 * Hh * Hh) + " cm/s", "V = 12πh³ gives dV/dt = 36πh² dh/dt, not 12πh²."], [fpi(R, 36 * Hh) + " cm/s", "Square the height: dV/dt = 36πh² dh/dt."], [`${frac(R * 36, Hh * Hh)}π cm/s`, "Divide by 36πh², don't multiply."]],
+      s: ["V = (1/3)πr²h with r = 6h ⇒ V = 12πh³.", "dV/dt = 36πh² (dh/dt).", `${R} = 36π(${Hh})² dh/dt ⇒ dh/dt = ${R}/(${den}π) = ${R / g}/(${den / g}π) cm/s.`], r: "Write V in terms of one variable before differentiating with respect to t."}; });
+  T(MA, "Application of Derivatives", H, 6, () => { const a = ri(-2, 3), y0 = a ** 3 - 3 * a + 2, m = 3 * a * a - 3, c = y0 - m * a; if(m === 0) return null;
+    const ln = (mm, cc) => `y = ${mm === 1 ? "" : mm === -1 ? "−" : M(mm)}x${cc === 0 ? "" : cc > 0 ? " + " + cc : " − " + Math.abs(cc)}`;
+    return {q: `The equation of the tangent to y = x³ − 3x + 2 at the point where x = ${M(a)} is:`, a: ln(m, c),
+      w: [[ln(3 * a * a, y0 - 3 * a * a * a), "The slope is 3x² − 3, not 3x²."], [ln(m, -c), "Check the intercept: c = y₀ − m x₀."], [ln(m, y0), "The tangent passes through (x₀, y₀); use y − y₀ = m(x − x₀)."]],
+      s: [`Point: y = (${M(a)})³ − 3(${M(a)}) + 2 = ${M(y0)}.`, `Slope: dy/dx = 3x² − 3 = ${M(m)}.`, `y − (${M(y0)}) = ${M(m)}(x − (${M(a)})) ⇒ ${ln(m, c)}.`], r: "Tangent: y − y₀ = f′(x₀)(x − x₀)."}; });
+  T(MA, "Application of Derivatives", H, 6, () => { const p = ri(-3, 1), q = ri(p + 1, 4), b = -3 * (p + q), c = 6 * p * q;
+    return {q: `f(x) = 2x³ ${b < 0 ? "− " + Math.abs(b) : "+ " + b}x² ${c < 0 ? "− " + Math.abs(c) : "+ " + c}x is strictly decreasing on:`, a: `(${M(p)}, ${M(q)})`,
+      w: [[`(−∞, ${M(p)}) ∪ (${M(q)}, ∞)`, "That is where f′(x) > 0, i.e. where f increases."], [`(${M(-q)}, ${M(-p)})`, "Watch the signs when solving 6(x − p)(x − q) = 0."], [`(${M(p)}, ∞)`, "f′ changes sign again at the second critical point."]],
+      s: [`f′(x) = 6x² ${b < 0 ? "− " + Math.abs(2 * b) : "+ " + 2 * b}x ${c < 0 ? "− " + Math.abs(c) : "+ " + c} = 6(x − ${M(p)})(x − ${M(q)}).`.replace("− −", "+ "), `f′(x) < 0 between the roots ${M(p)} and ${M(q)}.`, `So f decreases on (${M(p)}, ${M(q)}).`], r: "Find critical points, then test the sign of f′ in each interval."}; });
+  T(MA, "Application of Derivatives", H, 4, () => { const m = ri(2, 4), d = pick([1, 2, -1, 3]), cube = m ** 3, approx = m + d / (3 * m * m);
+    return {q: `Using differentials, the approximate value of ∛${cube + d} is:`, a: num(approx, 3), w: [[num(m + d / (2 * m), 3), "For a cube root, f′(x) = 1/(3x^(2/3)), not 1/(2√x)."], [num(m + d / (3 * m), 3), "f′(x) = 1/(3x^(2/3)) = 1/(3m²) at x = m³."], [num(m - d / (3 * m * m), 3), "Δy = f′(x)Δx keeps the sign of Δx."]],
+      s: [`Take x = ${cube}, Δx = ${M(d)}, f(x) = ∛x.`, `f′(x) = 1/(3x^(2/3)) = 1/(3·${m}²) = 1/${3 * m * m}.`, `∛${cube + d} ≈ ${m} + ${M(d)}/${3 * m * m} = ${num(approx, 3)}.`], r: "f(x + Δx) ≈ f(x) + f′(x)Δx."}; });
+  T(MA, "Application of Derivatives", H, 5, () => { const r = ri(2, 6); return {q: `The maximum area of a rectangle inscribed in a circle of radius ${r} cm is:`, a: 2 * r * r + " cm²",
+    w: [[r * r + " cm²", "The diagonal is the diameter 2r, so the square has side r√2 and area 2r²."], [4 * r * r + " cm²", "That is the area of the square circumscribing the circle."], [`${Math.PI.toFixed(0) === "3" ? r * r : 0}π cm²`.replace(/^(\d+)π/, "$1π"), "πr² is the area of the circle itself."]],
+    s: ["Sides 2r cos θ and 2r sin θ ⇒ A = 2r² sin 2θ.", "A is maximum when sin 2θ = 1, i.e. θ = 45° (a square).", `A = 2 × ${r}² = ${2 * r * r} cm².`], r: "Among rectangles in a circle, the square has the greatest area."}; });
+  // ===== MATHS: Continuity and Differentiability =====
+  [[2, "1", "√3", "1/√3"], [3, "√3", "1", "1/√3"], [4, "1/√3", "√3", "1"]].forEach(([n, a, w1, w2]) => T(MA, "Continuity and Differentiability", H, 1, () => {
+    const t = {2: "π/2", 3: "π/3", 4: "2π/3"}[n];
+    return {q: `If x = a(θ − sin θ) and y = a(1 − cos θ), then dy/dx at θ = ${t} is:`, a, w: [[w1, "dy/dx = sin θ/(1 − cos θ); substitute carefully."], [w2, "Use dy/dθ ÷ dx/dθ, not the other way round."], ["0", "sin θ ≠ 0 at this angle."]],
+      s: ["dx/dθ = a(1 − cos θ), dy/dθ = a sin θ.", "dy/dx = sin θ/(1 − cos θ) = cot(θ/2).", `At θ = ${t}: cot(${t.replace("2π/3", "π/3").replace("π/2", "π/4").replace("π/3", "π/6")}) = ${a}.`.replace("cot(π/6)", "cot(π/6)")], r: "Parametric: dy/dx = (dy/dt)/(dx/dt)."}; }));
+  [[1, 1, "−1"], [1, 2, "−4/5"], [2, 1, "−5/4"], [2, 3, "−7/8"]].forEach(([x, y, a]) => T(MA, "Continuity and Differentiability", H, 1, () => {
+    const k = x * x + x * y + y * y;
+    return {q: `If x² + xy + y² = ${k}, then dy/dx at (${x}, ${y}) is:`, a, w: [[frac(-(2 * x + y), 2 * y), "Differentiate xy by the product rule: x dy/dx + y."], [frac(2 * x + y, x + 2 * y), "Move terms carefully: dy/dx = −(2x + y)/(x + 2y)."], [frac(-x, y), "That is the slope for x² + y² = r², not this curve."]],
+      s: ["Differentiate: 2x + (x dy/dx + y) + 2y dy/dx = 0.", "dy/dx = −(2x + y)/(x + 2y).", `At (${x}, ${y}): −(${2 * x + y})/(${x + 2 * y}) = ${a}.`], r: "Implicit differentiation: differentiate every term, treating y as a function of x."}; }));
+  T(MA, "Continuity and Differentiability", H, 4, () => { const m = ri(1, 4), n = ri(-3, 3); if(n === m || n === 0) return null; const s1 = m + n, p1 = m * n;
+    const eq = (a, b) => `y″ ${a === 0 ? "" : a > 0 ? "− " + a + "y′" : "+ " + Math.abs(a) + "y′"} ${b === 0 ? "" : b > 0 ? "+ " + b + "y" : "− " + Math.abs(b) + "y"} = 0`.replace(/\s+/g, " ").replace("1y′", "y′").replace(/ 1y/, " y");
+    return {q: `y = Ae^(${m}x) + Be^(${n}x) satisfies which differential equation?`, a: eq(s1, p1), w: [[eq(-s1, p1), "The coefficient of y′ is −(m + n)."], [eq(s1, -p1), "The coefficient of y is +mn."], [eq(p1, s1), "Coefficients are −(m + n) for y′ and mn for y, not swapped."]],
+      s: [`m = ${m} and n = ${M(n)} are the roots of r² − (m + n)r + mn = 0.`, `So y″ − (${s1})y′ + (${p1})y = 0.`], r: "y = Ae^(mx) + Be^(nx) satisfies y″ − (m + n)y′ + mny = 0."}; });
+  [[0, "2"], ["1/2", "8/5"], ["1/3", "9/5"]].forEach(([x, a]) => T(MA, "Continuity and Differentiability", H, 1, () => ({q: `If y = sin⁻¹(2x/(1 + x²)), |x| < 1, then dy/dx at x = ${x} is:`, a,
+    w: [[x === 0 ? "1" : frac(...a.split("/").map(Number).map((v, i) => i ? v * 2 : v)), "Put x = tan θ: y = 2θ = 2 tan⁻¹x, so dy/dx = 2/(1 + x²)."], [x === 0 ? "0" : frac(...a.split("/").map(Number).map((v, i) => i ? v : v * 2)), "Don't double twice: dy/dx = 2/(1 + x²)."], ["−" + a, "For |x| < 1 the result is positive."]],
+    s: ["Let x = tan θ. Then 2x/(1 + x²) = sin 2θ, so y = 2θ = 2 tan⁻¹ x.", "dy/dx = 2/(1 + x²).", `At x = ${x}: ${a}.`], r: "Simplify inverse-trig expressions with a substitution before differentiating."})));
+  // ===== MATHS: Differential Equations =====
+  [2, 3, 4].forEach(a => T(MA, "Differential Equations", H, 1, () => ({q: `The general solution of dy/dx + ${a}y = e^(−x) is:`, a: `y = ${frac(1, a - 1)}·e^(−x) + Ce^(−${a}x)`.replace("1·", ""),
+    w: [[`y = ${frac(1, a + 1)}e^(−x) + Ce^(−${a}x)`.replace(/^y = 1\//, "y = 1/"), `∫e^((${a} − 1)x) dx = e^((${a} − 1)x)/(${a} − 1); the divisor is a − 1.`], [`y = e^(−x) + Ce^(${a}x)`, `The integrating factor is e^(${a}x), so the complementary term is Ce^(−${a}x).`], [`y = ${frac(1, a - 1)}e^(x) + Ce^(−${a}x)`.replace("1e", "e"), "Multiply back by e^(−ax) correctly: e^((a − 1)x)·e^(−ax) = e^(−x)."]],
+    s: [`IF = e^(∫${a} dx) = e^(${a}x).`, `y e^(${a}x) = ∫e^(−x)·e^(${a}x) dx = e^(${a - 1}x)/${a - 1} + C.`, `y = ${frac(1, a - 1)}e^(−x) + Ce^(−${a}x).`], r: "Linear DE: y·IF = ∫Q·IF dx + C with IF = e^(∫P dx)."})));
+  T(MA, "Differential Equations", H, 4, () => { const Td = pick([5, 10, 20, 25]), t3 = Td * Math.log(3) / Math.log(2);
+    return {q: `A population grows at a rate proportional to its size and doubles in ${Td} years. In about how many years will it triple?`, a: num(t3, 1) + " years",
+      w: [[1.5 * Td + " years", "Growth is exponential, not linear: t = T·log 3/log 2."], [num(Td * Math.log(2) / Math.log(3), 1) + " years", "The ratio is log 3/log 2, not log 2/log 3."], [3 * Td + " years", "Tripling does not take three doubling times."]],
+      s: ["dN/dt = kN ⇒ N = N₀e^(kt).", `Doubling: e^(${Td}k) = 2 ⇒ k = (log 2)/${Td}.`, `Tripling: e^(kt) = 3 ⇒ t = ${Td}·(log 3)/(log 2) ≈ ${num(t3, 1)} years.`], r: "Separate variables: dN/N = k dt."}; });
+  T(MA, "Differential Equations", H, 1, () => ({q: "The general solution of x dy/dx = y + x is:", a: "y = x log|x| + Cx", w: [["y = log|x| + C", "Divide by x: dy/dx − y/x = 1, IF = 1/x, then y/x = log|x| + C."], ["y = x² + Cx", "∫(1/x) dx = log|x|, not x."], ["y = Cx − x log|x|", "The sign of the log term is positive."]],
+    s: ["Rewrite: dy/dx − (1/x)y = 1.", "IF = e^(∫−1/x dx) = 1/x.", "y/x = ∫(1/x) dx = log|x| + C ⇒ y = x log|x| + Cx."], r: "Put the equation in the form dy/dx + Py = Q first."}));
+  // ===== MATHS: Vectors =====
+  const QD = [[1, 2, 2, 3], [2, 3, 6, 7], [2, 1, 2, 3], [1, 4, 8, 9], [4, 4, 7, 9], [6, 2, 3, 7]];
+  T(MA, "Vector Algebra", H, 6, () => { const A = pick(QD), Bq = pick(QD); const a = [A[0], -A[1], A[2]], b = [Bq[1], Bq[0], -Bq[2]], dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2], den = A[3] * Bq[3]; if(!dot) return null;
+    return {q: `The angle between a = ${vec(...a)} and b = ${vec(...b)} is:`, a: `cos⁻¹(${frac(dot, den)})`, w: [[`cos⁻¹(${frac(-dot, den)})`, "Watch the signs in a·b."], [`cos⁻¹(${frac(dot, A[3] + Bq[3])})`, "Divide by |a||b| (a product), not |a| + |b|."], [`sin⁻¹(${frac(Math.abs(dot), den)})`, "a·b gives the cosine of the angle, not the sine."]],
+      s: [`a·b = ${a[0] * b[0]} + ${a[1] * b[1]} + ${a[2] * b[2]} = ${dot}.`.replace(/\+ -/g, "− "), `|a| = ${A[3]}, |b| = ${Bq[3]}.`, `cos θ = ${dot}/${den} ⇒ θ = cos⁻¹(${frac(dot, den)}).`], r: "cos θ = a·b/(|a||b|)."}; });
+  T(MA, "Vector Algebra", H, 6, () => { const a = ri(2, 5), b = ri(2, 6), th = pick([60, 120, 90]), c = th === 60 ? 1 : th === 120 ? -1 : 0, sq = a * a + b * b + c * a * b;
+    return {q: `If |a| = ${a}, |b| = ${b} and the angle between them is ${th}°, then |a + b| is:`, a: root(sq), w: [[root(a * a + b * b + 2 * c * a * b) === root(sq) ? String(a + b) : root(a * a + b * b + 2 * c * a * b), "|a + b|² = a² + b² + 2ab cos θ; cos θ, not 2cos θ, multiplies 2ab."], [String(a + b), "|a + b| = |a| + |b| only when the vectors point the same way."], [root(a * a + b * b - c * a * b) === root(sq) ? root(a * a + b * b + 1) : root(a * a + b * b - c * a * b), "The cross term is +2ab cos θ."]],
+      s: ["|a + b|² = |a|² + |b|² + 2|a||b| cos θ.", `= ${a * a} + ${b * b} + 2·${a}·${b}·(${th === 60 ? "½" : th === 120 ? "−½" : "0"}) = ${sq}.`, `|a + b| = √${sq} = ${root(sq)}.`], r: "Square the magnitude and expand with the dot product."}; });
+  T(MA, "Vector Algebra", H, 6, () => { const a = [ri(-2, 3), ri(-2, 3), ri(1, 3)], b = [ri(-2, 3), ri(1, 3), ri(-2, 2)], c0 = [ri(-2, 2), ri(-2, 2)];
+    // coplanar: det[a; b; (c0x, c0y, λ)] = 0 → solve for λ
+    const A1 = a[1] * b[2] - a[2] * b[1], A2 = a[2] * b[0] - a[0] * b[2], A3 = a[0] * b[1] - a[1] * b[0]; if(!A3) return null; const lam = -(c0[0] * A1 + c0[1] * A2) / A3; if(lam !== Math.round(lam)) return null;
+    return {q: `For what value of λ are the vectors ${vec(...a)}, ${vec(...b)} and ${vec(c0[0], c0[1], 1).replace(/(\d*)k̂$/, "λk̂").replace(/^λk̂$/, "λk̂")} coplanar?`.replace("+ λk̂", "+ λk̂"), a: M(lam),
+      w: [[M(-lam), "Set the scalar triple product equal to zero and solve carefully for λ."], [M(lam + 1), "Recheck the cofactor of λ in the determinant."], ["0", "λ = 0 does not make the triple product zero."]],
+      s: ["Coplanar ⇔ [a b c] = 0.", `Expanding along the third vector: ${c0[0]}(${A1}) + ${c0[1]}(${A2}) + λ(${A3}) = 0.`.replace(/\(-/g, "(−"), `λ = ${M(lam)}.`], r: "Three vectors are coplanar when their scalar triple product is zero."}; });
+  T(MA, "Vector Algebra", H, 6, () => { const A = [ri(-2, 3), ri(-2, 3), ri(-2, 3)], Bv = [ri(-2, 3), ri(-2, 3), ri(-2, 3)], Cv = [ri(-2, 3), ri(-2, 3), ri(-2, 3)];
+    const u = Bv.map((v, i) => v - A[i]), v2 = Cv.map((v, i) => v - A[i]), cr = [u[1] * v2[2] - u[2] * v2[1], u[2] * v2[0] - u[0] * v2[2], u[0] * v2[1] - u[1] * v2[0]], n2 = cr.reduce((s, x) => s + x * x, 0); if(!n2) return null;
+    const pt = p => `(${p.join(", ")})`.replace(/-/g, "−");
+    return {q: `The area of the triangle with vertices A${pt(A)}, B${pt(Bv)} and C${pt(Cv)} is:`, a: `½ ${root(n2)} sq. units`.replace("½ 1 ", "½ ").replace(/^½ (\d+) /, (m0, k) => k % 2 ? m0 : `${k / 2} `),
+      w: [[`${root(n2)} sq. units`, "Area of a triangle is ½|AB × AC|; that is the parallelogram."], [`½ ${root(n2 + 2)} sq. units`, "Recompute AB × AC component by component."], [`¼ ${root(n2)} sq. units`, "The factor is ½, not ¼."]],
+      s: [`AB = ${vec(...u)}, AC = ${vec(...v2)}.`, `AB × AC = ${vec(...cr)}, |AB × AC| = √${n2}.`, `Area = ½√${n2} = ½ ${root(n2)} sq. units.`], r: "Area of triangle = ½|AB × AC|."}; });
+  // ===== MATHS: 3D Geometry =====
+  T(MA, "Three Dimensional Geometry", H, 8, () => { const a1 = [ri(-2, 2), ri(-2, 2), ri(-2, 2)], a2 = [ri(-2, 3), ri(-2, 3), ri(-2, 3)], b1 = [ri(1, 3), ri(-2, 2), ri(-2, 2)], b2 = [ri(-2, 2), ri(1, 3), ri(-2, 2)];
+    const cr = [b1[1] * b2[2] - b1[2] * b2[1], b1[2] * b2[0] - b1[0] * b2[2], b1[0] * b2[1] - b1[1] * b2[0]], n2 = cr.reduce((s, x) => s + x * x, 0); if(!n2) return null;
+    const d = a2.map((v, i) => v - a1[i]), tp = Math.abs(d[0] * cr[0] + d[1] * cr[1] + d[2] * cr[2]); if(!tp) return null;
+    const rf = root(n2), km = /^(\d*)√(\d+)$/.exec(rf), k0 = km ? (+km[1] || 1) : +rf, g0 = gcd(tp, k0), nn = tp / g0, kk = k0 / g0;
+    const ans = km ? `${nn}/${kk === 1 ? "" : kk}√${km[2]}` : frac(tp, +rf), alt = v => km ? `${v}/${kk === 1 ? "" : kk}√${km[2]}` : frac(v, +rf);
+    return {q: `The shortest distance between the lines r = (${vec(...a1)}) + λ(${vec(...b1)}) and r = (${vec(...a2)}) + μ(${vec(...b2)}) is:`, a: ans + " units",
+      w: [[alt(nn + 1) + " units", "Recompute (a₂ − a₁)·(b₁ × b₂)."], [`${tp} units`, "Divide by |b₁ × b₂|."], [(km ? `${nn}/${2 * kk}√${km[2]}` : frac(tp, 2 * +rf)) + " units", "There is no factor ½ in the skew-lines formula."]],
+      s: [`b₁ × b₂ = ${vec(...cr)}, |b₁ × b₂| = √${n2}.`, `a₂ − a₁ = ${vec(...d)}; (a₂ − a₁)·(b₁ × b₂) = ${tp} (absolute value).`, `d = ${tp}/√${n2} = ${ans} units.`], r: "d = |(a₂ − a₁)·(b₁ × b₂)| / |b₁ × b₂|."}; });
+  T(MA, "Three Dimensional Geometry", H, 6, () => { const A = pick(QD), Bq = pick(QD); const dot = A[0] * Bq[1] + A[1] * Bq[2] + A[2] * Bq[0];
+    return {q: `The angle between the lines with direction ratios ${A[0]}, ${A[1]}, ${A[2]} and ${Bq[1]}, ${Bq[2]}, ${Bq[0]} is:`, a: `cos⁻¹(${frac(dot, A[3] * Bq[3])})`,
+      w: [[`cos⁻¹(${frac(dot, A[3] + Bq[3])})`, "Divide by the product of magnitudes."], [`cos⁻¹(${frac(dot, A[3] * A[3])})`, "Use both magnitudes, √(a²+b²+c²) of each line."], ["90°", "The dot product is not zero, so the lines are not perpendicular."]],
+      s: [`a₁a₂ + b₁b₂ + c₁c₂ = ${dot}.`, `Magnitudes: ${A[3]} and ${Bq[3]}.`, `cos θ = ${dot}/${A[3] * Bq[3]}.`], r: "cos θ = |a₁a₂ + b₁b₂ + c₁c₂| / (√(a₁²+b₁²+c₁²) √(a₂²+b₂²+c₂²))."}; });
+  // ===== MATHS: Matrices & Determinants =====
+  T(MA, "Matrices", H, 6, () => { const a = ri(-3, 4), b = ri(-3, 4), c = ri(-3, 4), d = ri(-3, 4), tr = a + d, det = a * d - b * c;
+    const e = (k, m) => `A² ${k === 0 ? "" : k > 0 ? "− " + k + "A" : "+ " + Math.abs(k) + "A"} ${m === 0 ? "" : m > 0 ? "+ " + m + "I" : "− " + Math.abs(m) + "I"} = O`.replace(/\s+/g, " ").replace(" 1A", " A").replace(" 1I", " I");
+    return {q: `For A = ${m2([[a, b], [c, d]])}, which equation is true?`, a: e(tr, det), w: [[e(-tr, det), "The coefficient of A is −(trace)."], [e(tr, -det), "The constant term is +|A|·I."], [e(det, tr), "Trace and determinant are swapped."]],
+      s: [`Trace = ${M(a)} + ${M(d)} = ${M(tr)}; |A| = (${M(a)})(${M(d)}) − (${M(b)})(${M(c)}) = ${M(det)}.`, "Every 2 × 2 matrix satisfies A² − (tr A)A + |A| I = O (Cayley–Hamilton).", `So ${e(tr, det)}.`], r: "A² − (trace)A + |A|I = O for any 2 × 2 matrix."}; });
+  T(MA, "Matrices", H, 6, () => { const x = ri(-3, 4), y = ri(-3, 4), a = ri(1, 4), b = ri(-3, 3), c = ri(1, 4), d = ri(-3, 3); if(a * d - b * c === 0) return null; const p = a * x + b * y, q = c * x + d * y;
+    const eq = (m, n, r) => `${m}x ${n < 0 ? "− " + Math.abs(n) : "+ " + n}y = ${r}`.replace(/-/g, "−").replace(/^1x/, "x").replace(/ 1y/, " y").replace(/\+ 0y/, "");
+    return {q: `Using matrices, solve ${eq(a, b, p)} and ${eq(c, d, q)}.`, a: `x = ${M(x)}, y = ${M(y)}`, w: [[`x = ${M(y)}, y = ${M(x)}`, "Values swapped; check by substitution."], [`x = ${M(-x)}, y = ${M(-y)}`, "Watch the signs in A⁻¹ = adj A/|A|."], [`x = ${M(x + 1)}, y = ${M(y - 1)}`, "Substitute back: these values don't satisfy both equations."]],
+      s: [`A = ${m2([[a, b], [c, d]])}, |A| = ${M(a * d - b * c)} ≠ 0, so A⁻¹ exists.`, "X = A⁻¹B = (adj A · B)/|A|.", `x = ${M(x)}, y = ${M(y)} (check: both equations hold).`], r: "AX = B ⇒ X = A⁻¹B when |A| ≠ 0."}; });
+  T(MA, "Determinants", H, 5, () => { const k = ri(2, 6); return {q: `A is a 3 × 3 matrix with |A| = ${k}. Then |adj(adj A)| is:`, a: String(k ** 4), w: [[String(k ** 2), "|adj A| = |A|²; then |adj(adj A)| = |adj A|² = |A|⁴."], [String(k ** 3), "For n = 3 the exponent is (n − 1)² = 4."], [String(k ** 6), "Use |adj B| = |B|^(n−1) twice: (k²)² = k⁴."]],
+    s: ["For order n: |adj A| = |A|^(n − 1).", `|adj A| = ${k}² = ${k * k}.`, `|adj(adj A)| = |adj A|² = ${k ** 4}.`], r: "|adj(adj A)| = |A|^((n−1)²)."}; });
+  T(MA, "Determinants", H, 6, () => { const x1 = ri(-3, 3), y1 = ri(-3, 3), x2 = ri(-3, 4), y2 = ri(-3, 4), y3 = ri(-3, 4); const twiceArea0 = x1 * (y2 - y3) + x2 * (y3 - y1);   // third vertex (k, y3)
+    const cf = y1 - y2; if(cf === 0) return null; const area = ri(3, 9), ks = [(2 * area - twiceArea0) / cf, (-2 * area - twiceArea0) / cf].filter(v => Number.isInteger(v)); if(!ks.length) return null;
+    const ans = ks.length === 2 ? `${M(Math.max(...ks))} or ${M(Math.min(...ks))}` : M(ks[0]);
+    return {q: `The area of the triangle with vertices (${M(x1)}, ${M(y1)}), (${M(x2)}, ${M(y2)}) and (k, ${M(y3)}) is ${area} sq. units. Then k is:`, a: ans, w: [[ks.map(v => M(v * 2)).join(" or "), "Area = ½|Δ|; don't forget the ½."], [M(ks[0] + 1), "Recheck the determinant expansion."], [ks.length === 2 ? M(ks[0]) + " only" : M(-ks[0]), "Area uses |Δ|, so both signs of Δ give a valid k."], [M(ks[0] * 3), "Recheck the expansion of the determinant."]],
+      s: ["Area = ½|x₁(y₂ − y₃) + x₂(y₃ − y₁) + k(y₁ − y₂)|.", `½|${twiceArea0} + ${cf}k| = ${area} ⇒ ${twiceArea0} + ${cf}k = ±${2 * area}.`.replace(/\+ -/g, "− "), `k = ${ans}.`], r: "Area = ±½ Δ: always consider both signs."}; });
+  // ===== MATHS: Probability =====
+  T(MA, "Probability", H, 8, () => { const p = shuf([[50, 30, 20], [25, 35, 40], [30, 45, 25], [60, 30, 10]])[0], d = shuf([[1, 2, 3], [2, 3, 4], [4, 2, 5], [5, 4, 2], [3, 1, 2]])[0];
+    const tot = p[0] * d[0] + p[1] * d[1] + p[2] * d[2], who = ri(0, 2), n = p[who] * d[who], L = "ABC"[who];
+    return {q: `Machines A, B and C produce ${p[0]}%, ${p[1]}% and ${p[2]}% of a factory's bolts, and ${d[0]}%, ${d[1]}% and ${d[2]}% of their output is defective. A bolt chosen at random is defective. The probability that it was made by ${L} is:`, a: frac(n, tot),
+      w: [[frac(p[who], 100), "That is the prior P(" + L + "); Bayes' theorem updates it using the defect rates."], [frac(d[who], d[0] + d[1] + d[2]), "Weight each defect rate by the share of production."], [frac(n, tot + n), "The denominator is the total probability of a defective bolt."]],
+      s: [`P(defective) = ${p.map((x, i) => `${x}% × ${d[i]}%`).join(" + ")} ∝ ${tot}.`, `P(${L} ∩ defective) ∝ ${p[who]} × ${d[who]} = ${n}.`, `P(${L} | defective) = ${n}/${tot} = ${frac(n, tot)}.`], r: "Bayes: P(Eᵢ|A) = P(Eᵢ)P(A|Eᵢ) / Σ P(Eⱼ)P(A|Eⱼ)."}; });
+  T(MA, "Probability", H, 8, () => { const n = ri(4, 7), k = ri(1, n - 1), pd = pick([2, 3]), num1 = C(n, k) * (pd - 1) ** (n - k), den = pd ** n;
+    return {q: `A die is thrown ${n} times. If "getting ${pd === 2 ? "an even number" : "a number less than 3"}" is a success, the probability of exactly ${k} success${k > 1 ? "es" : ""} is:`, a: frac(num1, den),
+      w: [[frac(C(n, k), den), `Multiply by q^(n−k) as well: q = ${frac(pd - 1, pd)}.`], [frac((pd - 1) ** (n - k), den), `Don't forget the ${n}C${k} = ${C(n, k)} arrangements.`], [frac(k, n), "Binomial probability is ⁿCₖ pᵏ qⁿ⁻ᵏ, not k/n."]],
+      s: [`p = ${frac(1, pd)}, q = ${frac(pd - 1, pd)}, n = ${n}.`, `P(X = ${k}) = ${n}C${k} (${frac(1, pd)})^${k} (${frac(pd - 1, pd)})^${n - k} = ${C(n, k)} × ${(pd - 1) ** (n - k)}/${den}.`, `= ${frac(num1, den)}.`], r: "Binomial: P(X = r) = ⁿCᵣ pʳ qⁿ⁻ʳ."}; });
+  T(MA, "Probability", H, 6, () => { const ps = shuf([[1, 2], [1, 3], [1, 4], [2, 3], [3, 4], [1, 5]]).slice(0, 3); let qn = 1, qd = 1; ps.forEach(([a, b]) => { qn *= (b - a); qd *= b; });
+    return {q: `The probabilities that A, B and C solve a problem independently are ${ps.map(p => frac(...p)).join(", ")}. The probability that the problem is solved is:`, a: frac(qd - qn, qd),
+      w: [[frac(qn, qd), "That is the probability that nobody solves it."], [frac(ps.reduce((s, [a, b]) => s * a, 1), ps.reduce((s, [a, b]) => s * b, 1)), "That is the probability that all three solve it."], [frac(Math.min(ps.reduce((s, [a, b]) => s + a / b, 0) * 60, 60), 60), "You can't add probabilities of events that are not mutually exclusive."]],
+      s: ["Solved ⇔ at least one solves it.", `P(none) = ${ps.map(([a, b]) => frac(b - a, b)).join(" × ")} = ${frac(qn, qd)}.`, `P(solved) = 1 − ${frac(qn, qd)} = ${frac(qd - qn, qd)}.`], r: "P(at least one) = 1 − P(none)."}; });
+  // ===== MATHS: Relations, Inverse trig =====
+  T(MA, "Relations and Functions", H, 4, () => { const n = ri(3, 6); return {q: `The number of onto functions from a set with ${n} elements to a set with 2 elements is:`, a: String(2 ** n - 2),
+    w: [[String(2 ** n), "Subtract the 2 constant functions, which are not onto."], [String(2 ** n - 1), "There are two constant functions, not one."], [String(n * 2), "Each element has 2 choices: 2ⁿ functions in total."]], s: [`Total functions = 2^${n} = ${2 ** n}.`, "Exactly 2 of them are constant (not onto).", `Onto functions = ${2 ** n} − 2 = ${2 ** n - 2}.`], r: "Onto functions to a 2-element set: 2ⁿ − 2."}; });
+  [["1/2", "1/3", "π/4"], ["2", "3", "3π/4"], ["1/4", "3/5", "π/4"], ["1", "2", "π − tan⁻¹ 3"], ["1/7", "1/13", "tan⁻¹(2/9)"]].forEach(([x, y, a]) => T(MA, "Inverse Trigonometric Functions", H, 1, () => ({q: `tan⁻¹(${x}) + tan⁻¹(${y}) equals:`, a,
+    w: [["π/2", "π/2 is tan⁻¹x + cot⁻¹x."], [a === "π/4" ? "3π/4" : "π/4", "Apply (x + y)/(1 − xy) and check whether xy > 1."], [a === "tan⁻¹(2/9)" ? "tan⁻¹(1/5)" : "π/3", "Recompute (x + y)/(1 − xy)."]],
+    s: ["tan⁻¹x + tan⁻¹y = tan⁻¹[(x + y)/(1 − xy)] if xy < 1, and π + that if xy > 1 (x, y > 0).", `Here the result is ${a}.`], r: "When xy > 1 (x, y > 0), add π to the principal value."})));
+  [["sin(cos⁻¹(3/5))", "4/5"], ["cos(tan⁻¹(3/4))", "4/5"], ["tan(sin⁻¹(5/13))", "5/12"], ["sec(tan⁻¹(8/15))", "17/15"]].forEach(([e, a]) => T(MA, "Inverse Trigonometric Functions", Md, 1, () => ({q: `The value of ${e} is:`, a,
+    w: [["3/5", "Draw the right triangle and find the third side first."], ["5/4", "Take the ratio the right way up."], ["12/13", "Read the ratio from the correct sides."]].filter(w => w[0] !== a),
+    s: ["Draw a right triangle using the given ratio and find the missing side with Pythagoras.", `Then read the required ratio: ${a}.`], r: "Convert inverse-trig compositions with a right triangle."})));
+
+  // ===== PHYSICS =====
+  T(P, "Electric Charges and Fields", H, 4, () => { const r = pick([[4, 3], [9, 4], [16, 5]]), d = pick([30, 60, 90, 120]), x = d / r[1];
+    return {q: `Charges q and ${r[0]}q are placed ${d} cm apart. Where must a third charge be placed so that it feels no net force?`, a: `${num(x)} cm from q, between them`,
+      w: [[`${num(d / 2)} cm from q, between them`, "The forces balance where kq/x² = k·" + r[0] + "q/(d − x)², not at the midpoint."], [`${num(d * r[0] / (r[0] + 1))} cm from q, between them`, "Use the square root of the charge ratio: x/(d − x) = 1/√" + r[0] + "."], [`${num(x)} cm from q, outside them`, "For like charges the null point lies between them."]],
+      s: ["For like charges the null point is between them, nearer the smaller charge.", `kq/x² = k(${r[0]}q)/(${d} − x)² ⇒ (${d} − x)/x = √${r[0]} = ${r[1] - 1}.`, `x = ${d}/${r[1]} = ${num(x)} cm from q.`], r: "Null point: x = d/(1 + √(q₂/q₁)) from q₁ (like charges)."}; });
+  T(P, "Electric Charges and Fields", H, 6, () => { const q1 = ri(2, 8), q2 = ri(1, 6), d = pick([0.2, 0.4, 0.6]), like = pick([true, false]); if(q1 === q2 && like) return null; const r = d / 2, E = 9e9 * (like ? Math.abs(q1 - q2) : q1 + q2) * 1e-6 / (r * r);
+    return {q: `Point charges of ${q1} μC and ${like ? "" : "−"}${q2} μC are ${d} m apart. The electric field at the midpoint is:`, a: sci(E) + " N/C",
+      w: [[sci(9e9 * (like ? q1 + q2 : Math.abs(q1 - q2)) * 1e-6 / (r * r)) + " N/C", like ? "Fields of like charges at the midpoint point in opposite directions: subtract." : "Fields of unlike charges at the midpoint point the same way: add."], [sci(E / 4) + " N/C", "Use r = d/2 for each charge, not d."], [sci(E * r) + " N/C", "Field goes as 1/r², not 1/r."]],
+      s: [`Distance of each charge from the midpoint: ${r} m.`, `${like ? "Like charges: fields oppose" : "Unlike charges: fields add"}.`, `E = 9×10⁹ × ${like ? Math.abs(q1 - q2) : q1 + q2}×10⁻⁶ / ${r}² = ${sci(E)} N/C.`], r: "Add field vectors: check each direction before adding magnitudes."}; });
+  T(P, "Electric Charges and Fields", H, 5, () => { const m = pick([1.6, 3.2, 4.8, 8]), E = pick([2, 4, 5, 8]) * 1e4, q = m * 1e-15 * 9.8 / E, n = Math.round(q / 1.6e-19); if(Math.abs(n * 1.6e-19 - q) / q > 0.06) return null;
+    return {q: `An oil drop of mass ${m} × 10⁻¹⁵ kg is held stationary in an upward field of ${sci(E)} N/C. The number of excess electrons on it is about (g = 9.8 m/s², e = 1.6 × 10⁻¹⁹ C):`, a: String(n),
+      w: [[String(n * 2), "Use qE = mg directly; there is no factor 2."], [String(Math.max(1, Math.round(n / 9.8))), "Include g: q = mg/E."], [String(n * 10), "Check the powers of 10 in m and E."]],
+      s: ["Balance: qE = mg ⇒ q = mg/E.", `q = ${m}×10⁻¹⁵ × 9.8 / ${sci(E)} ≈ ${sci(q)} C.`, `n = q/e ≈ ${n}.`], r: "Stationary drop: electric force balances weight."}; });
+  T(P, "Electrostatic Potential and Capacitance", H, 5, () => { const q = ri(1, 5), a = pick([0.1, 0.2, 0.3, 0.5]), U = 9e9 * 3 * (q * 1e-6) ** 2 / a;
+    return {q: `Three equal charges of ${q} μC each are placed at the corners of an equilateral triangle of side ${a} m. The potential energy of the system is:`, a: sci(U) + " J",
+      w: [[sci(U / 3) + " J", "There are three pairs of charges, so three terms."], [sci(U * 2) + " J", "Each pair is counted once, not twice."], [sci(U * a) + " J", "Energy goes as 1/r, so divide by a."]],
+      s: ["U = k(q₁q₂/r₁₂ + q₂q₃/r₂₃ + q₁q₃/r₁₃).", `= 3 × 9×10⁹ × (${q}×10⁻⁶)² / ${a}.`, `= ${sci(U)} J.`], r: "System energy = sum over every pair of charges, each pair once."}; });
+  T(P, "Electrostatic Potential and Capacitance", H, 6, () => { const A = pick([0.01, 0.02, 0.04]), d = pick([4, 5, 6]) * 1e-3, t = d / 2, K = pick([2, 4, 5]), Cv = 8.85e-12 * A / (d - t + t / K);
+    return {q: `A parallel-plate capacitor has plate area ${A} m² and separation ${d * 1000} mm. A slab of dielectric constant ${K} and thickness ${t * 1000} mm is inserted. Its capacitance is:`, a: sci(Cv) + " F",
+      w: [[sci(8.85e-12 * A * K / d) + " F", "The slab fills only half the gap: use d − t + t/K."], [sci(8.85e-12 * A / d) + " F", "The dielectric increases the capacitance."], [sci(8.85e-12 * A / (d - t)) + " F", "The slab region still contributes t/K to the effective gap."]],
+      s: ["C = ε₀A / (d − t + t/K).", `d − t + t/K = ${d * 1000} − ${t * 1000} + ${t * 1000}/${K} = ${num((d - t + t / K) * 1000, 3)} mm.`, `C = 8.85×10⁻¹² × ${A} / ${num(d - t + t / K, 5)} = ${sci(Cv)} F.`], r: "Partial dielectric: replace the slab thickness t by t/K."}; });
+  T(P, "Electrostatic Potential and Capacitance", H, 6, () => { const C1 = ri(1, 6), C2 = ri(1, 6), V1 = 10 * ri(2, 10), V = C1 * V1 / (C1 + C2), loss = 0.5 * C1 * C2 * V1 * V1 / (C1 + C2);
+    return {q: `A ${C1} μF capacitor charged to ${V1} V is connected to an uncharged ${C2} μF capacitor. The energy lost in the process is:`, a: num(loss) + " μJ",
+      w: [["0 μJ", "Energy is lost as heat when charge redistributes."], [num(0.5 * C1 * V1 * V1) + " μJ", "That is the initial energy, not the loss."], [num(0.5 * (C1 + C2) * V * V) + " μJ", "That is the final energy; subtract it from the initial energy."]],
+      s: [`Common potential V = C₁V₁/(C₁ + C₂) = ${num(V)} V.`, `Energy lost = C₁C₂V₁²/[2(C₁ + C₂)] = ${C1}·${C2}·${V1}²/(2·${C1 + C2}).`, `= ${num(loss)} μJ.`], r: "Charge is conserved when capacitors share charge; energy is not."}; });
+  T(P, "Electrostatic Potential and Capacitance", H, 6, () => { const a = ri(2, 6), b = ri(2, 6), c = ri(1, 6), V = 6 * ri(1, 4), Ceq = a * b / (a + b) + c;
+    return {q: `${a} μF and ${b} μF capacitors in series are connected in parallel with a ${c} μF capacitor across ${V} V. The total charge drawn is:`, a: num(Ceq * V) + " μC",
+      w: [[num((a + b + c) * V) + " μC", "Only the c branch is in parallel; a and b are in series."], [num(1 / (1 / a + 1 / b + 1 / c) * V) + " μC", "c is in parallel with the series pair, not in series."], [num(Ceq) + " μC", "Multiply the equivalent capacitance by V."]],
+      s: [`Series pair: ${a}×${b}/(${a}+${b}) = ${num(a * b / (a + b))} μF.`, `Add ${c} μF in parallel: C = ${num(Ceq)} μF.`, `Q = CV = ${num(Ceq)} × ${V} = ${num(Ceq * V)} μC.`], r: "Reduce series parts first, then add parallel capacitances."}; });
+  T(P, "Current Electricity", H, 6, () => { const n = ri(2, 6), E = pick([1.5, 2]), r = pick([0.5, 1]), R = ri(2, 10), I = n * E / (R + n * r);
+    return {q: `${n} cells, each of emf ${E} V and internal resistance ${r} Ω, are joined in series to a ${R} Ω resistor. The current is:`, a: num(I) + " A",
+      w: [[num(n * E / (R + r)) + " A", "Internal resistances also add in series: nr."], [num(E / (R + r)) + " A", "In series the emfs add: nE."], [num(n * E / R) + " A", "Include the internal resistance of the cells."]],
+      s: [`Total emf = ${n} × ${E} = ${num(n * E)} V; total internal resistance = ${n} × ${r} = ${num(n * r)} Ω.`, `I = ${num(n * E)} / (${R} + ${num(n * r)}) = ${num(I)} A.`], r: "Series cells: E_total = nE, r_total = nr."}; });
+  T(P, "Current Electricity", H, 6, () => { const P1 = pick([40, 60, 100]), P2 = pick([25, 40, 60, 100, 200]); if(P1 === P2) return null; const Pt = P1 * P2 / (P1 + P2);
+    return {q: `Bulbs rated ${P1} W, 220 V and ${P2} W, 220 V are connected in series across 220 V. The total power consumed is:`, a: num(Pt, 1) + " W",
+      w: [[(P1 + P2) + " W", "That would be in parallel; in series the resistances add."], [num((P1 + P2) / 2, 1) + " W", "Find R = V²/P for each bulb, then P = V²/(R₁ + R₂)."], [Math.min(P1, P2) + " W", "The series total is less than either rating."]],
+      s: ["R = V²/P for each bulb, so 1/P_total = 1/P₁ + 1/P₂ in series.", `P = ${P1}×${P2}/(${P1}+${P2}) = ${num(Pt, 1)} W.`], r: "Series on the rated voltage: P = P₁P₂/(P₁ + P₂)."}; });
+  T(P, "Current Electricity", H, 5, () => { const l1 = pick([40, 50, 60, 75]), l2 = pick([30, 40, 50, 60]); if(l1 === l2) return null; const E1 = pick([1.5, 1.2, 2]);
+    return {q: `In a potentiometer, a cell of emf ${E1} V balances at ${l1} cm. Another cell balances at ${l2} cm. Its emf is:`, a: num(E1 * l2 / l1, 3) + " V", w: [[num(E1 * l1 / l2, 3) + " V", "E ∝ l, so E₂ = E₁ l₂/l₁ (not l₁/l₂)."], [num(E1 + (l2 - l1) / 100, 3) + " V", "Use the ratio of lengths, not the difference."], [num(E1, 3) + " V", "Different balancing lengths mean different emfs."]],
+      s: ["At balance, E ∝ balancing length.", `E₂ = ${E1} × ${l2}/${l1} = ${num(E1 * l2 / l1, 3)} V.`], r: "Potentiometer: E₁/E₂ = l₁/l₂."}; });
+  T(P, "Moving Charges and Magnetism", H, 6, () => { const G = pick([20, 25, 50, 100]), Ig = pick([1, 2, 5]), I = pick([1, 2, 5]), S = Ig * 1e-3 * G / (I - Ig * 1e-3);
+    return {q: `A galvanometer of resistance ${G} Ω gives full-scale deflection at ${Ig} mA. The shunt needed to convert it into an ammeter of range 0–${I} A is about:`, a: sci(S, 3) + " Ω",
+      w: [[sci(Ig * 1e-3 * G / I, 3) + " Ω", "Use I − I_g through the shunt, not I."], [sci(I * G / (Ig * 1e-3), 3) + " Ω", "The shunt is small; divide by (I − I_g)."], [sci(G - I / (Ig * 1e-3), 3) + " Ω", "That formula is for a voltmeter (series resistance)."]].filter(w => !/−/.test(w[0])),
+      s: ["The shunt carries I − I_g and has the same p.d. as the galvanometer.", "S = I_g G/(I − I_g).", `S = ${Ig}×10⁻³ × ${G} / (${I} − ${Ig}×10⁻³) ≈ ${sci(S, 3)} Ω.`], r: "Ammeter: a small resistance in parallel (shunt)."}; });
+  T(P, "Moving Charges and Magnetism", H, 5, () => { const B = pick([0.5, 1, 1.5, 2]), f = 1.6e-19 * B / (2 * Math.PI * 1.67e-27);
+    return {q: `The cyclotron frequency of a proton in a magnetic field of ${B} T is about (m = 1.67 × 10⁻²⁷ kg):`, a: sci(f, 3) + " Hz",
+      w: [[sci(f * 2 * Math.PI, 3) + " Hz", "That is the angular frequency ω = qB/m; divide by 2π."], [sci(f / B, 3) + " Hz", "Frequency is proportional to B."], [sci(f * 1836, 3) + " Hz", "Use the proton mass, not the electron mass."]],
+      s: ["f = qB/(2πm), independent of speed.", `f = 1.6×10⁻¹⁹ × ${B} / (2π × 1.67×10⁻²⁷) ≈ ${sci(f, 3)} Hz.`], r: "Cyclotron frequency doesn't depend on the particle's speed."}; });
+  T(P, "Moving Charges and Magnetism", H, 5, () => { const I = pick([2, 4, 5, 10]), R = pick([2, 5, 10]), th = pick([[180, "semicircular"], [90, "quarter-circle"]]), B = 1e-7 * I * (th[0] * Math.PI / 180) / (R / 100);
+    return {q: `A wire bent into a ${th[1]} arc of radius ${R} cm carries ${I} A. The field at the centre due to the arc is:`, a: sci(B) + " T",
+      w: [[sci(B * 360 / th[0]) + " T", `A full loop gives μ₀I/2R; this arc is only ${th[0]}/360 of it.`], [sci(B * 100) + " T", "Convert cm to m."], [sci(B / Math.PI) + " T", "Keep the angle in radians: θ = " + (th[0] === 180 ? "π" : "π/2") + "."]],
+      s: ["B = (μ₀I/4πR) × θ, with θ in radians.", `= 10⁻⁷ × ${I} × ${th[0] === 180 ? "π" : "π/2"} / ${R / 100} = ${sci(B)} T.`], r: "Arc of angle θ: B = μ₀Iθ/(4πR)."}; });
+  T(P, "Electromagnetic Induction", H, 6, () => { const B = pick([0.2, 0.5, 1]), l = pick([0.2, 0.5, 1]), v = pick([2, 5, 10]), R = pick([1, 2, 5]), F = B * B * l * l * v / R;
+    return {q: `A rod of length ${l} m slides at ${v} m/s on rails in a field of ${B} T, closing a circuit of resistance ${R} Ω. The force needed to keep it moving at constant speed is:`, a: sci(F, 3) + " N",
+      w: [[sci(B * l * v / R, 3) + " N", "That is the current I = Blv/R; the force is BIl."], [sci(B * l * v, 3) + " N", "That is the induced emf (in volts), not the force."], [sci(F * R * R, 3) + " N", "Divide by R once: F = B²l²v/R."]],
+      s: [`emf = Blv = ${num(B * l * v, 3)} V; I = emf/R = ${num(B * l * v / R, 3)} A.`, "Magnetic force on the rod F = BIl opposes the motion; the applied force must equal it.", `F = B²l²v/R = ${sci(F, 3)} N.`], r: "Lenz's law: the induced current's force opposes the motion."}; });
+  T(P, "Electromagnetic Induction", H, 5, () => { const N = pick([50, 100, 200]), A = pick([0.01, 0.02, 0.05]), B = pick([0.1, 0.2, 0.5]), f = pick([50, 60]), e0 = N * B * A * 2 * Math.PI * f;
+    return {q: `A coil of ${N} turns and area ${A} m² rotates at ${f} rev/s in a field of ${B} T. The peak emf is:`, a: num(e0, 1) + " V",
+      w: [[num(N * B * A * f, 1) + " V", "Use ω = 2πf, not f."], [num(e0 / Math.SQRT2, 1) + " V", "That is the rms value; the peak is NBAω."], [num(B * A * 2 * Math.PI * f, 1) + " V", "Multiply by the number of turns N."]],
+      s: [`ω = 2π × ${f} = ${num(2 * Math.PI * f, 1)} rad/s.`, `e₀ = NBAω = ${N} × ${B} × ${A} × ${num(2 * Math.PI * f, 1)} = ${num(e0, 1)} V.`], r: "AC generator: e = NBAω sin ωt."}; });
+  T(P, "Alternating Current", H, 6, () => { const L = pick([0.1, 0.2, 0.5, 1]), Cc = pick([1, 2, 4, 10]), R = pick([5, 10, 20, 50]), Qf = Math.sqrt(L / (Cc * 1e-6)) / R;
+    return {q: `A series LCR circuit has L = ${L} H, C = ${Cc} μF and R = ${R} Ω. Its quality factor is:`, a: num(Qf, 1), w: [[num(Qf * R * R, 1), "Q = (1/R)√(L/C): divide by R."], [num(Math.sqrt(L * Cc * 1e-6) / R * 1e3, 1), "It is √(L/C), not √(LC)."], [num(Qf / 2, 1), "There is no factor ½."]],
+      s: ["Q = (1/R)√(L/C).", `√(L/C) = √(${L}/${Cc}×10⁻⁶) = ${num(Math.sqrt(L / (Cc * 1e-6)), 1)} Ω.`, `Q = ${num(Math.sqrt(L / (Cc * 1e-6)), 1)}/${R} = ${num(Qf, 1)}.`], r: "Higher Q means a sharper resonance."}; });
+  T(P, "Alternating Current", H, 5, () => { const V = pick([100, 200, 220]), R = pick([10, 20, 50]), XL = pick([100, 200, 400]), VL = V / R * XL;
+    return {q: `At resonance, a series LCR circuit with R = ${R} Ω and X_L = X_C = ${XL} Ω is connected to ${V} V rms. The rms voltage across the inductor is:`, a: VL + " V",
+      w: [[V + " V", "The source voltage equals the voltage across R only; V_L = I X_L can be much larger."], ["0 V", "V_L and V_C cancel each other, but each is large."], [num(V / 2) + " V", "At resonance I = V/R, so V_L = (V/R)X_L."]],
+      s: [`At resonance Z = R, so I = ${V}/${R} = ${num(V / R)} A.`, `V_L = I X_L = ${num(V / R)} × ${XL} = ${VL} V.`], r: "At resonance the L and C voltages can each exceed the supply voltage."}; });
+  T(P, "Ray Optics and Optical Instruments", H, 4, () => { const ng = pick([1.5, 1.6]), nw = 4 / 3, fa = pick([10, 20, 30]), fw = fa * (ng - 1) / (ng / nw - 1);
+    return {q: `A convex lens (n = ${ng}) has focal length ${fa} cm in air. Its focal length in water (n = 4/3) is:`, a: num(fw, 1) + " cm",
+      w: [[num(fa, 1) + " cm", "Focal length depends on the surrounding medium."], [num(fa * nw, 1) + " cm", "Use the lens maker's formula with relative index ng/nw."], [num(fa * (ng / nw - 1) / (ng - 1), 1) + " cm", "The ratio is upside down: f_w/f_a = (ng − 1)/(ng/nw − 1)."]],
+      s: ["1/f = (n_rel − 1)(1/R₁ − 1/R₂) with n_rel = n_lens/n_medium.", `f_w/f_a = (${ng} − 1)/(${ng}/(4/3) − 1) = ${num((ng - 1) / (ng / nw - 1), 3)}.`, `f_w = ${num(fw, 1)} cm.`], r: "In a denser medium, a lens's focal length increases."}; });
+  [["√2", 60, 30], ["√3", 60, 60], ["1.5", 60, 37.2]].forEach(([n, A, dm]) => T(P, "Ray Optics and Optical Instruments", H, 1, () => ({q: `A prism of angle ${A}° has refractive index ${n}. Its angle of minimum deviation is:`, a: (dm === 37.2 ? "about 37.2°" : dm + "°"),
+    w: [[dm === 30 ? "45°" : dm === 60 ? "30°" : "48.6°", "Use n = sin[(A + δm)/2]/sin(A/2) and solve for δm."], [A + "°", "δm is not equal to the prism angle in general."], [dm === 37.2 ? "about 22.8°" : "15°", "Solve (A + δm)/2 first, then subtract A."]],
+    s: [`n = sin[(A + δm)/2]/sin(A/2) ⇒ sin[(A + δm)/2] = ${n} × sin ${A / 2}°.`, `(A + δm)/2 = ${dm === 37.2 ? "48.6" : (A + dm) / 2}° ⇒ δm = ${dm === 37.2 ? "about 37.2" : dm}°.`], r: "Minimum deviation: the ray passes symmetrically through the prism."})));
+  T(P, "Ray Optics and Optical Instruments", H, 5, () => { const f = pick([10, 15, 20]), u = pick([30, 40, 60]), h = pick([2, 3, 4]); if(u === f) return null; const v = u * f / (u - f), m = -v / u, hi = m * h;
+    return {q: `A ${h} cm tall object is placed ${u} cm in front of a concave mirror of focal length ${f} cm. The height of the image is:`, a: num(hi, 2) + " cm",
+      w: [[num(-hi, 2) + " cm", "The image of a real object beyond F is inverted: its height is negative."], [num(h * f / u, 2) + " cm", "Find v from the mirror formula first, then m = −v/u."], [num(h, 2) + " cm", "The image is the same size only at the centre of curvature."]],
+      s: [`1/v + 1/u = 1/f with u = −${u}, f = −${f} ⇒ v = −${num(v, 2)} cm.`, `m = −v/u = ${num(m, 3)}.`, `h′ = m × h = ${num(hi, 2)} cm (inverted).`], r: "Mirror: m = −v/u = h′/h."}; });
+  T(P, "Wave Optics", H, 4, () => { const ph = pick([[3, "λ/3", "2π/3", 1], [4, "λ/4", "π/2", 2], [6, "λ/6", "π/3", 3]]);
+    return {q: `In YDSE the maximum intensity is I₀. The intensity at a point where the path difference is ${ph[1]} is:`, a: ph[3] === 1 ? "I₀/4" : ph[3] === 2 ? "I₀/2" : "3I₀/4",
+      w: [["I₀", "That is at zero path difference."], ["0", "Zero intensity needs a path difference of λ/2."], [ph[3] === 1 ? "I₀/2" : "I₀/4", "I = I₀ cos²(φ/2): compute φ = 2π × (path difference)/λ."]],
+      s: [`Phase difference φ = (2π/λ) × ${ph[1]} = ${ph[2]}.`, "I = I₀ cos²(φ/2).", `cos²(φ/2) = cos²(${ph[2] === "2π/3" ? "π/3" : ph[2] === "π/2" ? "π/4" : "π/6"}) = ${ph[3] === 1 ? "1/4" : ph[3] === 2 ? "1/2" : "3/4"}, so I = ${ph[3] === 1 ? "I₀/4" : ph[3] === 2 ? "I₀/2" : "3I₀/4"}.`], r: "Phase difference = (2π/λ) × path difference."}; });
+  T(P, "Wave Optics", H, 5, () => { const l = pick([500, 600, 650]), a = pick([0.1, 0.2, 0.5]), D = pick([1, 2]), w = 2 * l * 1e-9 * D / (a * 1e-3);
+    return {q: `Light of wavelength ${l} nm falls on a slit of width ${a} mm. The width of the central maximum on a screen ${D} m away is:`, a: num(w * 1000, 2) + " mm",
+      w: [[num(w * 500, 2) + " mm", "The central maximum is 2λD/a wide (it spans both first minima)."], [num(w * 1e6, 2) + " mm", "Convert mm and nm to metres consistently."], [num(w * 2000, 2) + " mm", "There is no factor 4."]],
+      s: ["First minima at y = ±λD/a, so width = 2λD/a.", `= 2 × ${l}×10⁻⁹ × ${D} / ${a}×10⁻³ = ${num(w * 1000, 2)} mm.`], r: "Single slit: central maximum is twice as wide as the others."}; });
+  T(P, "Dual Nature of Radiation and Matter", H, 1, () => ({q: "A proton and an alpha particle are accelerated through the same potential difference. The ratio of their de Broglie wavelengths λp : λα is:", a: "2√2 : 1",
+    w: [["1 : 2√2", "λ ∝ 1/√(mq), and the proton has the smaller mq, so its λ is larger."], ["2 : 1", "Both mass (×4) and charge (×2) differ: √(4 × 2) = 2√2."], ["√2 : 1", "Include the mass ratio as well as the charge ratio."]],
+    s: ["λ = h/√(2mqV), so λ ∝ 1/√(mq).", "m_α = 4m_p and q_α = 2q_p ⇒ λp/λα = √(4 × 2) = 2√2."], r: "Same V: λ ∝ 1/√(mq)."}));
+  T(P, "Dual Nature of Radiation and Matter", H, 5, () => { const Pw = pick([1, 2, 5, 10]), l = pick([400, 500, 600, 663]), N = Pw * l * 1e-9 / (6.63e-34 * 3e8);
+    return {q: `A ${Pw} W source emits light of wavelength ${l} nm. The number of photons emitted per second is about:`, a: sci(N),
+      w: [[sci(N / 1e9 * 1e0)], [sci(N * 1e9) , "Convert nm to m (× 10⁻⁹)."], [sci(1 / N), "N = P/E, not E/P."]].map(w => w.length === 1 ? [sci(N * 10), "Recheck E = hc/λ."] : w),
+      s: [`E per photon = hc/λ = 6.63×10⁻³⁴ × 3×10⁸ / ${l}×10⁻⁹ = ${sci(6.63e-34 * 3e8 / (l * 1e-9))} J.`, `N = P/E = ${Pw}/${sci(6.63e-34 * 3e8 / (l * 1e-9))} ≈ ${sci(N)}.`], r: "Photons per second = power ÷ energy of one photon."}; });
+  [[3, 2, "656 nm", "Balmer"], [2, 1, "122 nm", "Lyman"], [4, 2, "486 nm", "Balmer"], [4, 3, "1875 nm", "Paschen"]].forEach(([a, b, l, s]) => T(P, "Atoms", H, 1, () => ({q: `The wavelength of the line emitted when a hydrogen electron falls from n = ${a} to n = ${b} is about (R = 1.097 × 10⁷ m⁻¹):`, a: l,
+    w: [["91 nm", "That is the series limit of the Lyman series (n = ∞ → 1)."], [l === "656 nm" ? "486 nm" : "656 nm", "Use 1/λ = R(1/n₁² − 1/n₂²) with the right levels."], [l === "1875 nm" ? "122 nm" : "1875 nm", "Lower final level → shorter wavelength."]],
+    s: [`1/λ = R(1/${b}² − 1/${a}²) = 1.097×10⁷ × ${num(1 / (b * b) - 1 / (a * a), 4)}.`, `λ ≈ ${l} (${s} series).`], r: "1/λ = R(1/n_f² − 1/n_i²)."})));
+  T(P, "Nuclei", H, 5, () => { const m = pick([[2.014102, 3.016049, 4.002603, 1.008665, "²H + ³H → ⁴He + n"]]), dm = m[0] + m[1] - m[2] - m[3], Qv = dm * 931.5;
+    return {q: `For the fusion reaction ${m[4]}, the masses are ²H = ${m[0]} u, ³H = ${m[1]} u, ⁴He = ${m[2]} u and n = ${m[3]} u. The energy released is about:`, a: num(Qv, 1) + " MeV",
+      w: [[num(Qv / 931.5 * 1000, 1) + " MeV", "Multiply the mass defect by 931.5 MeV/u."], [num((m[0] + m[1] - m[2]) * 931.5, 1) + " MeV", "Include the neutron on the product side."], [num(Qv * 2, 1) + " MeV", "Each mass is counted once."]],
+      s: [`Δm = (${m[0]} + ${m[1]}) − (${m[2]} + ${m[3]}) = ${num(dm, 6)} u.`, `Q = ${num(dm, 6)} × 931.5 ≈ ${num(Qv, 1)} MeV.`], r: "Q = (mass of reactants − mass of products) × 931.5 MeV/u."}; });
+  T(P, "Nuclei", H, 5, () => { const T = pick([2, 3, 5, 8]), n = ri(2, 5), A0 = pick([64, 80, 128, 160]) * 1;
+    return {q: `A sample with half-life ${T} h has an activity of ${A0} mCi. Its activity after ${n * T} h is:`, a: num(A0 / 2 ** n, 2) + " mCi",
+      w: [[num(A0 / (2 * n), 2) + " mCi", `After ${n} half-lives the activity is A₀/2ⁿ, not A₀/2n.`], [num(A0 * (1 - 1 / 2 ** n), 2) + " mCi", "That is the decayed part; the activity left is A₀/2ⁿ."], [num(A0 / 2 ** (n - 1), 2) + " mCi", `Count the half-lives: ${n * T}/${T} = ${n}.`]],
+      s: [`Number of half-lives = ${n * T}/${T} = ${n}.`, `A = ${A0}/2^${n} = ${num(A0 / 2 ** n, 2)} mCi.`], r: "A = A₀(½)^(t/T½)."}; });
+  T(P, "Semiconductor Electronics", H, 6, () => { const Vin = pick([10, 12, 15, 20]), Vz = pick([5, 6, 8]), R = pick([100, 200, 500]), RL = pick([1000, 2000]); if(Vin <= Vz) return null; const I = (Vin - Vz) / R, IL = Vz / RL, Iz = I - IL; if(Iz <= 0) return null;
+    return {q: `A ${Vz} V Zener diode with series resistance ${R} Ω and load ${RL} Ω is supplied with ${Vin} V. The current through the Zener is:`, a: num(Iz * 1000, 1) + " mA",
+      w: [[num(I * 1000, 1) + " mA", "That is the total current through R; subtract the load current."], [num(IL * 1000, 1) + " mA", "That is the load current."], [num(Vin / R * 1000, 1) + " mA", "The drop across R is V_in − V_z."]],
+      s: [`I = (V_in − V_z)/R = (${Vin} − ${Vz})/${R} = ${num(I * 1000, 1)} mA.`, `I_L = V_z/R_L = ${Vz}/${RL} = ${num(IL * 1000, 1)} mA.`, `I_z = I − I_L = ${num(Iz * 1000, 1)} mA.`], r: "Zener regulator: I_z = I − I_L."}; });
+  [["Y = NOT (A AND B)", "1110"], ["Y = NOT (A OR B)", "1000"], ["Y = (A AND B) OR (NOT A)", "1101"], ["Y = A XOR B", "0110"]].forEach(([e, a]) => T(P, "Semiconductor Electronics", H, 1, () => ({q: `For ${e}, the outputs for inputs AB = 00, 01, 10, 11 are:`, a,
+    w: [["0001", "That is AND."], ["0111", "That is OR."], ["1001", "That is XNOR."], ["1110", "That is NAND."], ["1000", "That is NOR."], ["0110", "That is XOR."]].filter(w => w[0] !== a),
+    s: ["Work row by row through the truth table.", `Outputs: ${a.split("").join(", ")}.`], r: "Build the truth table step by step for combined gates."})));
+
+  // ===== CHEMISTRY (physical) =====
+  T(CH, "Solutions", H, 6, () => { const M0 = pick([60, 180, 342, 128]), Wv = pick([100, 200, 250, 500]), Mm = M0 * pick([0.5, 1, 2]) / 1, w = num(Mm * pick([1, 2, 0.5]) * Wv / 1000 * 0.5, 2) * 1, dT = 1.86 * w * 1000 / (M0 * Wv);
+    return {q: `${w} g of a non-electrolyte dissolved in ${Wv} g of water lowers the freezing point by ${num(dT, 3)} K (K_f = 1.86 K kg mol⁻¹). The molar mass of the solute is:`, a: M0 + " g mol⁻¹",
+      w: [[num(M0 * Wv / 1000, 1) + " g mol⁻¹", "Convert the solvent mass to kg inside the formula: M = K_f w × 1000/(ΔT_f W)."], [num(M0 * 2, 1) + " g mol⁻¹", "A non-electrolyte has i = 1."], [num(1.86 * w / (dT * Wv), 3) + " g mol⁻¹", "Multiply by 1000 to convert grams of solvent to kg."]],
+      s: ["ΔT_f = K_f × (w/M) × (1000/W).", `M = K_f × w × 1000/(ΔT_f × W) = 1.86 × ${w} × 1000/(${num(dT, 3)} × ${Wv}).`, `M ≈ ${M0} g mol⁻¹.`], r: "Colligative properties give molar masses."}; });
+  T(CH, "Solutions", H, 6, () => { const n = pick([2, 3]), a = pick([0.2, 0.4, 0.5, 0.8]), i = 1 + a * (n - 1);
+    return {q: `A salt that gives ${n} ions per formula unit has a van 't Hoff factor of ${num(i, 2)} in solution. Its degree of dissociation is:`, a: num(a * 100, 0) + "%",
+      w: [[num((i - 1) * 100, 0) + "%", `α = (i − 1)/(n − 1); here n − 1 = ${n - 1}.`], [num(i / n * 100, 0) + "%", "Use α = (i − 1)/(n − 1), not i/n."], [num((1 - a) * 100, 0) + "%", "That is the undissociated fraction."]].filter(w => w[0] !== num(a * 100, 0) + "%"),
+      s: ["i = 1 + α(n − 1).", `α = (i − 1)/(n − 1) = (${num(i, 2)} − 1)/${n - 1} = ${num(a, 2)}.`], r: "Dissociation raises i above 1; association lowers it."}; });
+  T(CH, "Solutions", H, 6, () => { const pA = pick([100, 200, 300, 450]), pB = pick([50, 80, 150]), xA = pick([0.2, 0.25, 0.4, 0.5, 0.6]), p = xA * pA + (1 - xA) * pB, yA = xA * pA / p;
+    return {q: `Liquids A (p° = ${pA} mm Hg) and B (p° = ${pB} mm Hg) form an ideal solution with x_A = ${xA}. The mole fraction of A in the vapour is:`, a: num(yA, 3),
+      w: [[num(xA, 3), "The vapour is richer in the more volatile liquid; y_A ≠ x_A."], [num(1 - yA, 3), "That is y_B."], [num(xA * pA / (pA + pB), 3), "Divide by the total vapour pressure of the solution, not p°A + p°B."]],
+      s: [`p_A = ${xA} × ${pA} = ${num(xA * pA, 1)}; p_B = ${num(1 - xA, 2)} × ${pB} = ${num((1 - xA) * pB, 1)}.`, `p_total = ${num(p, 1)} mm Hg.`, `y_A = p_A/p_total = ${num(yA, 3)}.`], r: "Dalton's law: y_A = p_A/p_total."}; });
+  T(CH, "Electrochemistry", H, 6, () => { const c1 = pick([0.01, 0.1, 1]), c2 = pick([0.01, 0.1, 1]); if(c1 === c2) return null; const E = 1.10 - 0.0295 * Math.log10(c1 / c2);
+    return {q: `The emf of the cell Zn | Zn²⁺(${c1} M) || Cu²⁺(${c2} M) | Cu at 298 K is (E°cell = 1.10 V):`, a: num(E, 3) + " V",
+      w: [[num(1.10 + 0.0295 * Math.log10(c1 / c2), 3) + " V", "Q = [Zn²⁺]/[Cu²⁺] (products over reactants)."], [num(1.10 - 0.059 * Math.log10(c1 / c2), 3) + " V", "Divide 0.059 by n = 2."], ["1.1 V", "Non-standard concentrations change the emf."]],
+      s: ["Zn + Cu²⁺ → Zn²⁺ + Cu, n = 2.", `E = E° − (0.059/2) log([Zn²⁺]/[Cu²⁺]) = 1.10 − 0.0295 log(${c1}/${c2}).`, `E = ${num(E, 3)} V.`], r: "Nernst: E = E° − (0.059/n) log Q at 298 K."}; });
+  T(CH, "Electrochemistry", H, 5, () => { const E = pick([0.295, 0.59, 0.118, 0.236]), n = pick([1, 2]), lk = n * E / 0.059;
+    return {q: `A cell reaction has n = ${n} and E°cell = ${E} V at 298 K. Its equilibrium constant is:`, a: "10^" + num(lk, 0),
+      w: [["10^" + num(E / 0.059, 0), "log K = nE°/0.059: multiply by n."].map((x, i) => i === 0 && n === 1 ? "10^" + num(lk * 2, 0) : x), ["10^" + num(lk / 2, 0), "Don't halve: log K = nE°/0.059."], ["10^-" + num(lk, 0), "A positive E° means K > 1."]],
+      s: ["log K = nE°/0.059.", `= ${n} × ${E}/0.059 = ${num(lk, 0)}.`, `K = 10^${num(lk, 0)}.`], r: "ΔG° = −nFE° = −RT ln K."}; });
+  T(CH, "Electrochemistry", H, 6, () => { const c = pick([0.001, 0.01, 0.025]), L0 = 390.5, a = pick([0.05, 0.1, 0.12]), Lm = a * L0, Ka = c * a * a / (1 - a);
+    return {q: `${c} M acetic acid has Λm = ${num(Lm, 2)} S cm² mol⁻¹ and Λ°m = ${L0} S cm² mol⁻¹. Its dissociation constant is about:`, a: sci(Ka, 2),
+      w: [[sci(c * a, 2), "Ka = cα²/(1 − α): square α."], [sci(a * a, 2), "Multiply by the concentration c."], [sci(c * a * a / (1 + a), 2), "The denominator is (1 − α)."]],
+      s: [`α = Λm/Λ°m = ${num(Lm, 2)}/${L0} = ${a}.`, `Ka = cα²/(1 − α) = ${c} × ${a}²/(1 − ${a}) ≈ ${sci(Ka, 2)}.`], r: "Weak electrolyte: α = Λm/Λ°m."}; });
+  T(CH, "Chemical Kinetics", H, 4, () => { const pr = pick([[300, 310, 2], [300, 310, 3], [298, 308, 2], [300, 320, 4]]), Ea = 2.303 * 8.314 * Math.log10(pr[2]) * pr[0] * pr[1] / (pr[1] - pr[0]) / 1000;
+    return {q: `The rate constant of a reaction becomes ${pr[2]} times when the temperature rises from ${pr[0]} K to ${pr[1]} K. The activation energy is about:`, a: num(Ea, 1) + " kJ mol⁻¹",
+      w: [[num(Ea * 1000 / 8.314, 0) + " kJ mol⁻¹", "Use R = 8.314 J K⁻¹ mol⁻¹ and convert J to kJ."], [num(Ea / 2.303, 1) + " kJ mol⁻¹", "Keep the 2.303 when using log₁₀."], [num(Ea * (pr[1] - pr[0]) / pr[0], 1) + " kJ mol⁻¹", "Use T₁T₂/(T₂ − T₁)."]],
+      s: ["log(k₂/k₁) = (Ea/2.303R)(1/T₁ − 1/T₂).", `log ${pr[2]} = (Ea/(2.303 × 8.314)) × (${pr[1] - pr[0]}/(${pr[0]} × ${pr[1]})).`, `Ea ≈ ${num(Ea, 1)} kJ mol⁻¹.`], r: "Arrhenius: k = A e^(−Ea/RT)."}; });
+  T(CH, "Chemical Kinetics", H, 4, () => { const t90 = pick([10, 20, 30, 46]);
+    return {q: `A first-order reaction is 90% complete in ${t90} min. The time for 99% completion is:`, a: 2 * t90 + " min",
+      w: [[num(t90 * 1.1, 1) + " min", "First-order times go as log([R]₀/[R]): log 100 = 2 log 10."], [10 * t90 + " min", "99% needs [R]₀/[R] = 100, which is twice log 10, not ten times."], [num(t90 * 99 / 90, 1) + " min", "Time isn't proportional to the percentage."]],
+      s: ["t = (2.303/k) log([R]₀/[R]).", "90%: [R]₀/[R] = 10 ⇒ t₉₀ = 2.303/k. 99%: [R]₀/[R] = 100 ⇒ t₉₉ = 2 × 2.303/k.", `So t₉₉ = 2t₉₀ = ${2 * t90} min.`], r: "For first order, t₉₉ = 2t₉₀ and t₉₉.₉ ≈ 10t½."}; });
+  T(CH, "Chemical Kinetics", H, 6, () => { const x = pick([0, 1, 2]), y = pick([0, 1, 2]), r0 = pick([2, 3, 5]), fA = pick([2, 3]), fB = 2;
+    return {q: `For A + B → products: doubling... initial rates (mol L⁻¹ s⁻¹): [A] = 0.1, [B] = 0.1 → ${r0}×10⁻³; [A] = ${0.1 * fA}, [B] = 0.1 → ${r0 * fA ** x}×10⁻³; [A] = 0.1, [B] = 0.2 → ${r0 * fB ** y}×10⁻³. The rate law is:`.replace("doubling... ", ""),
+      a: `rate = k[A]${x === 0 ? "⁰" : x === 2 ? "²" : ""}[B]${y === 0 ? "⁰" : y === 2 ? "²" : ""}`, w: [[`rate = k[A]${y === 0 ? "⁰" : y === 2 ? "²" : ""}[B]${x === 0 ? "⁰" : x === 2 ? "²" : ""}`, "Orders swapped: compare runs where only one concentration changes."], [`rate = k[A]${x + 1 > 2 ? "³" : x + 1 === 2 ? "²" : ""}[B]${y === 0 ? "⁰" : y === 2 ? "²" : ""}`, "Recompute the ratio of rates for A."], ["rate = k[A][B]", "The orders come from the data, not the equation."]],
+      s: [`Changing [A] ×${fA} changes the rate ×${fA ** x} ⇒ order in A = ${x}.`, `Changing [B] ×2 changes the rate ×${2 ** y} ⇒ order in B = ${y}.`], r: "Order = log(rate ratio)/log(concentration ratio)."}; });
+  [["d³ (e.g. Cr³⁺)", "−1.2Δo"], ["d⁶ low spin (e.g. [Fe(CN)₆]⁴⁻)", "−2.4Δo + 3P"], ["d⁶ high spin (e.g. [CoF₆]³⁻)", "−0.4Δo + P"], ["d⁸ (e.g. Ni²⁺)", "−1.2Δo + 3P"]].forEach(([d, a]) => T(CH, "Coordination Compounds", H, 1, () => ({q: `The crystal field stabilisation energy (with pairing energy P) for an octahedral ${d} ion is:`, a,
+    w: [["−1.2Δo", "Count t₂g and eg electrons: CFSE = (−0.4 t₂g + 0.6 eg)Δo, plus pairing."], ["−2.4Δo + 3P", "That is d⁶ low spin."], ["−0.4Δo + P", "That is d⁶ high spin."], ["−1.2Δo + 3P", "That is d⁸."], ["−0.6Δo", "t₂g electrons each contribute −0.4Δo, eg +0.6Δo."]].filter(w => w[0] !== a),
+    s: ["CFSE = (−0.4 × t₂g electrons + 0.6 × eg electrons)Δo + (extra pairs) × P.", `For ${d}: ${a}.`], r: "Strong-field ligands → low spin (more pairing, larger CFSE)."})));
+}
+
+// ---- Class 10 numerical templates (NCERT pattern, Medium/Hard; weighted to Algebra, Trigonometry, Mensuration, Electricity, Light) ----
+function EXTRA10(h){
+  const {T, ri, pick, shuf, gcd, M, num, frac} = h;
+  const H = "Hard", Md = "Medium", MA = "Maths", SC = "Science";
+  const lcm = (a, b) => a / gcd(a, b) * b;
+  // Real Numbers
+  T(MA, "Real Numbers", H, 6, () => { const a = pick([12, 15, 18, 20, 24, 30, 36]), b = pick([16, 20, 25, 27, 40, 45]), c = pick([10, 14, 21, 28]); if(a === b) return null; const L = lcm(lcm(a, b), c);
+    return {q: `Three bells ring at intervals of ${a}, ${b} and ${c} minutes. They ring together at 8 a.m. After how many minutes will they next ring together?`, a: L + " minutes",
+      w: [[a * b * c + " minutes", "That's the product; the first common time is the LCM."], [gcd(gcd(a, b), c) + " minutes", "HCF gives the largest common divisor, not the next common multiple."], [lcm(a, b) + " minutes", "Include the third bell in the LCM."]],
+      s: [`Prime factorise ${a}, ${b} and ${c}.`, `LCM(${a}, ${b}, ${c}) = ${L}.`, `They ring together again after ${L} minutes.`], r: "\"Together again\" problems use the LCM."}; });
+  T(MA, "Real Numbers", H, 6, () => { const g = pick([6, 8, 9, 12, 13, 15]), r1 = ri(1, g - 1), r2 = ri(1, g - 1), x = g * ri(4, 11) + r1, y = g * ri(5, 13) + r2; if(gcd(x - r1, y - r2) !== g) return null;
+    return {q: `The largest number that divides ${x} and ${y} leaving remainders ${r1} and ${r2} respectively is:`, a: String(g),
+      w: [[String(gcd(x, y)), "Subtract the remainders first: HCF(" + (x - r1) + ", " + (y - r2) + ")."], [String(lcm(x - r1, y - r2)), "LCM is the smallest common multiple; we need the HCF."], [String(g * 2), "Check that it divides both numbers exactly."]].filter(w => w[0] !== String(g)),
+      s: [`${x} − ${r1} = ${x - r1} and ${y} − ${r2} = ${y - r2} must both be divisible by the number.`, `HCF(${x - r1}, ${y - r2}) = ${g}.`], r: "Remove the remainders, then take the HCF."}; });
+  // Polynomials
+  T(MA, "Polynomials", H, 8, () => { const p = ri(-6, 7), q = ri(-6, 8); if(!q) return null; const k = pick([1, 2, 3]);
+    const poly = `x² ${p > 0 ? "− " + p : "+ " + Math.abs(p)}x ${q < 0 ? "− " + Math.abs(q) : "+ " + q}`.replace("+ 0x ", "").replace("− 0x ", "");
+    const opts = {1: ["α² + β²", p * p - 2 * q, "α² + β² = (α + β)² − 2αβ"], 2: ["1/α + 1/β", frac(p, q), "1/α + 1/β = (α + β)/αβ"], 3: ["α³ + β³", p ** 3 - 3 * q * p, "α³ + β³ = (α + β)³ − 3αβ(α + β)"]}[k];
+    const ans = String(opts[1]).replace("-", "−");
+    const wr = k === 1 ? [[M(p * p + 2 * q), "It is (α + β)² − 2αβ: subtract 2αβ."], [M(p * p), "Don't forget the −2αβ term."], [M(p * p - q), "The middle term is 2αβ, not αβ."]]
+      : k === 2 ? [[frac(q, p), "It's (α + β)/αβ, not αβ/(α + β)."], [frac(-p, q), "For x² + bx + c, α + β = −b; check the sign."], [frac(1, q), "Use α + β in the numerator."]]
+      : [[M(p ** 3), "Subtract 3αβ(α + β)."], [M(p ** 3 + 3 * q * p), "The term 3αβ(α + β) is subtracted."], [M(p ** 3 - q * p), "The coefficient is 3."]];
+    return {q: `If α and β are the zeroes of ${poly}, then ${opts[0]} equals:`, a: ans, w: wr,
+      s: [`α + β = ${M(p)}, αβ = ${M(q)}.`, `${opts[2]}.`, `= ${ans}.`], r: "Express symmetric functions of zeroes using α + β and αβ."}; });
+  // Linear equations
+  T(MA, "Pair of Linear Equations in Two Variables", H, 8, () => { const x = ri(3, 9), y = ri(x + 2, 15), d1 = ri(1, 3), m1 = pick([2, 3]); if((x - d1) * m1 !== y && (y - (x - d1) * m1) % 1) return null;
+    // fraction x/y: (x−d1)/y = 1/m1 ⇒ y = m1(x−d1); and (x + d2)/(y + d2) = ...
+    const yy = m1 * (x - d1); if(yy <= x) return null; const d2 = ri(1, 4), n2 = x + d2, den2 = yy + d2, g2 = gcd(n2, den2);
+    return {q: `A fraction becomes 1/${m1} when ${d1} is subtracted from its numerator, and becomes ${n2 / g2}/${den2 / g2} when ${d2} is added to both numerator and denominator. The fraction is:`, a: `${x}/${yy}`,
+      w: [[`${yy}/${x}`, "Numerator and denominator are swapped."], [`${x + 1}/${yy}`, "Check both conditions by substitution."], [`${x}/${yy + d1}`, "Set up: (x − " + d1 + ")/y = 1/" + m1 + " ⇒ y = " + m1 + "(x − " + d1 + ")."]],
+      s: [`Let the fraction be x/y. (x − ${d1})/y = 1/${m1} ⇒ y = ${m1}x − ${m1 * d1}.`, `(x + ${d2})/(y + ${d2}) = ${n2 / g2}/${den2 / g2} gives a second linear equation.`, `Solving: x = ${x}, y = ${yy}. Fraction = ${x}/${yy}.`], r: "Translate each condition into one linear equation, then solve the pair."}; });
+  T(MA, "Pair of Linear Equations in Two Variables", H, 8, () => { const a = ri(1, 6), c = ri(1, 5), d = ri(1, 6), b = ri(1, 9), e = ri(1, 9); const k = a * c / d; if(!Number.isInteger(k) || b / e === a / d) return null;
+    return {q: `For what value of k do the equations kx + ${a}y = ${b} and ${c}x + ${d}y = ${e} have no solution?`, a: String(k),
+      w: [[frac(c * d, a), "No solution needs k/" + c + " = " + a + "/" + d + "."], [frac(b * c, e), "Compare a₁/a₂ with b₁/b₂, not c₁/c₂."], [String(k + 1), "Recompute k = " + a + " × " + c + "/" + d + "."]],
+      s: ["No solution ⇔ a₁/a₂ = b₁/b₂ ≠ c₁/c₂.", `k/${c} = ${a}/${d} ⇒ k = ${k}.`, `Check: ${a}/${d} ≠ ${b}/${e}, so the lines are parallel.`], r: "Parallel lines: a₁/a₂ = b₁/b₂ ≠ c₁/c₂."}; });
+  // Quadratic
+  T(MA, "Quadratic Equations", H, 8, () => { const n = ri(5, 20), P = n * (n + 1);
+    return {q: `The product of two consecutive positive integers is ${P}. The integers are:`, a: `${n} and ${n + 1}`, w: [[`${n - 1} and ${n}`, "Multiply to check: " + (n - 1) * n + " ≠ " + P + "."], [`${n + 1} and ${n + 2}`, "Their product is " + (n + 1) * (n + 2) + "."], [`${n} and ${n + 2}`, "Consecutive integers differ by 1."]],
+      s: [`x(x + 1) = ${P} ⇒ x² + x − ${P} = 0.`, `(x − ${n})(x + ${n + 1}) = 0 ⇒ x = ${n} (positive).`], r: "Form the quadratic, factorise, reject the negative root."}; });
+  T(MA, "Quadratic Equations", H, 6, () => { const v = pick([30, 40, 45, 50, 60]), d = pick([180, 240, 360, 400, 600]), t1 = d / v, inc = pick([5, 10, 15]), t2 = d / (v + inc); const diff = (t1 - t2) * 60; if(!Number.isInteger(diff)) return null;
+    return {q: `A train travels ${d} km at a uniform speed. If its speed were ${inc} km/h more, it would take ${diff} minutes less. Its speed is:`, a: v + " km/h",
+      w: [[v + inc + " km/h", "That is the increased speed."], [num(v * 1.5) + " km/h", "Check: " + d + "/x − " + d + "/(x + " + inc + ") must equal " + diff + "/60 h."], [v - inc + " km/h", "Solve the quadratic carefully and reject the negative root."]],
+      s: [`${d}/x − ${d}/(x + ${inc}) = ${diff}/60.`, "Clear denominators to get a quadratic in x.", `The positive root is x = ${v} km/h.`], r: "Time = distance/speed; convert minutes to hours."}; });
+  // AP
+  T(MA, "Arithmetic Progressions", H, 7, () => { const k = ri(3, 9), first = Math.ceil(10 / k) * k, last = Math.floor(99 / k) * k, n = (last - first) / k + 1;
+    return {q: `How many two-digit numbers are divisible by ${k}?`, a: String(n), w: [[String(n - 1), "Count both the first (" + first + ") and last (" + last + ") terms: n = (l − a)/d + 1."], [String(Math.floor(99 / k)), "That counts one-digit multiples too."], [String(n + 1), "Recheck the last term ≤ 99."]],
+      s: [`First two-digit multiple: ${first}; last: ${last}.`, `n = (${last} − ${first})/${k} + 1 = ${n}.`], r: "aₙ = a + (n − 1)d ⇒ n = (l − a)/d + 1."}; });
+  T(MA, "Arithmetic Progressions", H, 8, () => { const a = ri(-3, 6), b = ri(1, 5), n = ri(8, 20);   // S_n = a n + b n² ... use S_n = b n² + a n
+    const t = (m) => b * (2 * m - 1) + a;
+    return {q: `The sum of the first n terms of an AP is ${b === 1 ? "" : b}n² ${a < 0 ? "− " + Math.abs(a) : "+ " + a}n. Its ${n}th term is:`.replace("+ 0n", ""), a: String(t(n)),
+      w: [[String(b * n * n + a * n), "That is Sₙ; the nth term is Sₙ − Sₙ₋₁."], [String(t(n) - 2 * b), "That is the (n − 1)th term."], [String(2 * b * n + a), "aₙ = Sₙ − Sₙ₋₁ = " + b + "(2n − 1) + " + a + "."]],
+      s: ["aₙ = Sₙ − Sₙ₋₁.", `= [${b}n² + ${a}n] − [${b}(n − 1)² + ${a}(n − 1)] = ${b}(2n − 1) + ${a}.`.replace(/\+ -/g, "− "), `a${n} = ${t(n)}.`], r: "Any term from the sum formula: aₙ = Sₙ − Sₙ₋₁."}; });
+  // Triangles
+  T(MA, "Triangles", H, 8, () => { const s1 = ri(2, 9), s2 = ri(2, 9); if(s1 === s2) return null; const A1 = pick([16, 25, 36, 48, 64, 81, 100]);
+    return {q: `Two similar triangles have corresponding sides in the ratio ${s1} : ${s2}. If the area of the first is ${A1} cm², the area of the second is:`, a: num(A1 * s2 * s2 / (s1 * s1), 2) + " cm²",
+      w: [[num(A1 * s2 / s1, 2) + " cm²", "Areas go as the SQUARE of the side ratio."], [num(A1 * s1 * s1 / (s2 * s2), 2) + " cm²", "Ratio inverted: the second triangle corresponds to " + s2 + "."], [num(A1 * s2 ** 3 / s1 ** 3, 2) + " cm²", "Square, not cube, the ratio."]],
+      s: ["Areas of similar triangles are in the ratio of the squares of corresponding sides.", `A₂ = ${A1} × (${s2}/${s1})² = ${num(A1 * s2 * s2 / (s1 * s1), 2)} cm².`], r: "ar₁/ar₂ = (side₁/side₂)²."}; });
+  T(MA, "Triangles", H, 6, () => { const tr = pick([[3, 4, 5], [6, 8, 10], [5, 12, 13], [8, 15, 17], [7, 24, 25]]), k = pick([1, 2]);
+    return {q: `A ladder ${tr[2] * k} m long reaches a window ${tr[1] * k} m above the ground. How far is the foot of the ladder from the wall?`, a: tr[0] * k + " m",
+      w: [[`√${(tr[2] ** 2 + tr[1] ** 2) * k * k} m`, "The ladder is the hypotenuse: subtract the squares."], [(tr[2] - tr[1]) * k + " m", "Use Pythagoras, not a difference of lengths."], [tr[1] * k + " m", "That is the height of the window."]],
+      s: ["The ladder is the hypotenuse.", `d² = ${tr[2] * k}² − ${tr[1] * k}² = ${(tr[0] * k) ** 2}.`, `d = ${tr[0] * k} m.`], r: "Pythagoras: hypotenuse² = base² + height²."}; });
+  // Coordinate geometry
+  T(MA, "Coordinate Geometry", H, 8, () => { const x1 = ri(-6, 6), y1 = -ri(1, 6), x2 = ri(-6, 6), y2 = ri(1, 8), g = gcd(-y1, y2);
+    return {q: `The ratio in which the x-axis divides the segment joining (${M(x1)}, ${M(y1)}) and (${M(x2)}, ${M(y2)}) is:`, a: `${-y1 / g} : ${y2 / g}`,
+      w: [[`${y2 / g} : ${-y1 / g}`, "The ratio is −y₁ : y₂ (distance from the first point first)."], [`${Math.abs(x1) || 1} : ${Math.abs(x2) || 1}`, "On the x-axis y = 0; use the y-coordinates."], ["1 : 1", "Only if |y₁| = |y₂|."]].filter(w => w[0] !== `${-y1 / g} : ${y2 / g}`),
+      s: ["Let the ratio be k : 1; the point has y = (k·y₂ + y₁)/(k + 1) = 0.", `k = −y₁/y₂ = ${-y1}/${y2}.`, `Ratio = ${-y1 / g} : ${y2 / g}.`], r: "x-axis ⇒ y = 0; y-axis ⇒ x = 0."}; });
+  T(MA, "Coordinate Geometry", H, 8, () => { const x1 = ri(-5, 6), y1 = ri(-5, 6), x2 = ri(-5, 6), y2 = ri(-5, 6); if(x1 === x2) return null; const xn = (x2 * x2 + y2 * y2 - x1 * x1 - y1 * y1), xd = 2 * (x2 - x1);
+    return {q: `The point on the x-axis equidistant from (${M(x1)}, ${M(y1)}) and (${M(x2)}, ${M(y2)}) is:`, a: `(${frac(xn, xd)}, 0)`,
+      w: [[`(0, ${frac(xn, xd)})`, "A point on the x-axis has y = 0."], [`(${frac((x1 + x2), 2)}, 0)`, "That is the midpoint's x-coordinate; equidistance needs PA² = PB²."], [`(${frac(-xn, xd)}, 0)`, "Watch the signs when expanding the squares."]],
+      s: ["Let P = (x, 0). PA² = PB².", `(x − ${M(x1)})² + ${y1 * y1} = (x − ${M(x2)})² + ${y2 * y2}.`.replace(/− −/g, "+ "), `Solving: x = ${frac(xn, xd)}.`], r: "Equidistant ⇒ equate squared distances (no square roots needed)."}; });
+  // Trigonometry
+  T(MA, "Introduction to Trigonometry", H, 8, () => { const a = ri(1, 9), b = ri(2, 9); if(a === b || gcd(a, b) > 1) return null;
+    return {q: `If tan A = ${a}/${b}, then (${a} sin A − ${b} cos A)/(${a} sin A + ${b} cos A) equals:`, a: frac(a * a - b * b, a * a + b * b),
+      w: [[frac(a - b, a + b), "Divide numerator and denominator by cos A, then substitute tan A."], [frac(a * a + b * b, a * a - b * b), "The fraction is upside down."], [frac(b * b - a * a, a * a + b * b), "Check the sign of the numerator."]].filter(w => w[0] !== frac(a * a - b * b, a * a + b * b)),
+      s: ["Divide every term by cos A: (a tan A − b)/(a tan A + b).", `= (${a}·${a}/${b} − ${b})/(${a}·${a}/${b} + ${b}) = (${a * a} − ${b * b})/(${a * a} + ${b * b}).`, `= ${frac(a * a - b * b, a * a + b * b)}.`], r: "Divide by cos A to turn sin and cos into tan."}; });
+  [["2 tan 30°/(1 + tan²30°)", "√3/2", "sin 60°"], ["(1 − tan²45°)/(1 + tan²45°)", "0", "cos 90°"], ["2 tan 30°/(1 − tan²30°)", "√3", "tan 60°"], ["(1 − tan²30°)/(1 + tan²30°)", "1/2", "cos 60°"]].forEach(([e, a, why]) => T(MA, "Introduction to Trigonometry", H, 1, () => ({q: `The value of ${e} is:`, a,
+    w: [["1/√3", "Substitute tan 30° = 1/√3 and simplify fully."], ["1", "Recheck the arithmetic in numerator and denominator."], ["√3/2", "That is sin 60°."], ["√3", "That is tan 60°."], ["0", "Check the numerator."], ["1/2", "That is cos 60°."]].filter(w => w[0] !== a),
+    s: [`Substitute the standard values and simplify.`, `It equals ${why} = ${a}.`], r: "Standard values: tan 30° = 1/√3, tan 45° = 1, tan 60° = √3."})));
+  T(MA, "Introduction to Trigonometry", H, 6, () => { const tr = pick([[3, 4, 5], [5, 12, 13], [8, 15, 17], [7, 24, 25], [20, 21, 29]]);
+    return {q: `If sin A = ${tr[0]}/${tr[2]} (A acute), then (tan A + sec A) equals:`, a: frac(tr[0] + tr[2], tr[1]),
+      w: [[frac(tr[0] + tr[1], tr[2]), "tan A = opp/adj and sec A = hyp/adj; both have adjacent = " + tr[1] + "."], [frac(tr[2] - tr[0], tr[1]), "Add, don't subtract."], [frac(tr[0] + tr[2], tr[0]), "The denominator is the adjacent side " + tr[1] + "."]],
+      s: [`Opposite = ${tr[0]}, hypotenuse = ${tr[2]} ⇒ adjacent = √(${tr[2]}² − ${tr[0]}²) = ${tr[1]}.`, `tan A = ${tr[0]}/${tr[1]}, sec A = ${tr[2]}/${tr[1]}.`, `Sum = ${frac(tr[0] + tr[2], tr[1])}.`], r: "Draw the right triangle and find the third side first."}; });
+  T(MA, "Some Applications of Trigonometry", H, 6, () => { const d = pick([10, 20, 30, 40, 50]);
+    return {q: `From two points on the same side of a tower, ${d} m apart, the angles of elevation of its top are 30° and 60°. The height of the tower is:`, a: `${d % 2 ? d + "√3/2" : (d / 2 === 1 ? "" : d / 2) + "√3"} m`,
+      w: [[`${d}√3 m`, "Solve h = x√3 and h = (x + d)/√3 together: x = d/2."], [`${d} m`, "Use both angles; the height is d√3/2."], [`${d / 2} m`, "That is the distance x from the nearer point."]],
+      s: ["Let the nearer point be x m from the foot: h = x tan 60° = x√3.", `From the farther point: h = (x + ${d}) tan 30° = (x + ${d})/√3.`, `x√3 = (x + ${d})/√3 ⇒ 3x = x + ${d} ⇒ x = ${d / 2}; h = ${d / 2}√3 m.`], r: "Write h twice with the two angles, then eliminate the unknown distance."}; });
+  T(MA, "Some Applications of Trigonometry", H, 6, () => { const h0 = pick([20, 30, 45, 60, 75]), ang = pick([[45, "1"], [60, "√3"]]);
+    return {q: `From the top of a ${h0} m high building, the angle of depression of a car on the road is ${ang[0]}°. The distance of the car from the building is:`, a: ang[0] === 45 ? h0 + " m" : `${h0 % 3 ? h0 + "/√3" : (h0 / 3) + "√3"} m`,
+      w: [[ang[0] === 45 ? h0 + "√2 m" : h0 + "√3 m", "tan θ = height/distance ⇒ distance = height/tan θ."], [h0 * 2 + " m", "Use tan, not sin, for height and horizontal distance."], [num(h0 / 2) + " m", "Recheck tan " + ang[0] + "°."]],
+      s: ["The angle of depression from the top equals the angle of elevation from the car.", `tan ${ang[0]}° = ${h0}/d ⇒ d = ${h0}/${ang[1]}.`], r: "Angle of depression = angle of elevation (alternate angles)."}; });
+  // Circles
+  T(MA, "Circles", H, 8, () => { const a = ri(5, 12), b = ri(5, 12), c = ri(5, 12), d = a + c - b; if(d <= 2) return null;
+    return {q: `A quadrilateral ABCD is drawn to circumscribe a circle. If AB = ${a} cm, BC = ${b} cm and CD = ${c} cm, then AD is:`, a: d + " cm",
+      w: [[a + b - c + " cm", "Opposite sides add up equally: AB + CD = AD + BC."], [b + c - a + " cm", "AD = AB + CD − BC."], [a + b + c - d * 2 + " cm", "Use tangent lengths from each vertex being equal."]].filter(w => w[0] !== d + " cm"),
+      s: ["Tangents from an external point are equal, which gives AB + CD = AD + BC.", `AD = ${a} + ${c} − ${b} = ${d} cm.`], r: "Tangential quadrilateral: sums of opposite sides are equal."}; });
+  // Areas related to circles
+  T(MA, "Areas Related to Circles", H, 6, () => { const r = pick([7, 14, 21, 28]), sec = 22 / 7 * r * r / 4, tri = r * r / 2;
+    return {q: `A chord of a circle of radius ${r} cm subtends a right angle at the centre. The area of the minor segment is (π = 22/7):`, a: num(sec - tri) + " cm²",
+      w: [[num(sec) + " cm²", "That is the sector; subtract the triangle."], [num(sec + tri) + " cm²", "Subtract the triangle, don't add it."], [num(22 / 7 * r * r - sec + tri) + " cm²", "That is the major segment."]],
+      s: [`Sector (90°) = ¼ × 22/7 × ${r}² = ${num(sec)} cm².`, `Triangle = ½ × ${r} × ${r} = ${num(tri)} cm².`, `Segment = ${num(sec)} − ${num(tri)} = ${num(sec - tri)} cm².`], r: "Segment = sector − triangle."}; });
+  T(MA, "Areas Related to Circles", H, 6, () => { const r = pick([35, 42, 49, 56]), revs = ri(5, 20) * 10, dist = 2 * 22 / 7 * r * revs / 100;
+    return {q: `A wheel of radius ${r} cm makes ${revs} revolutions. The distance covered is (π = 22/7):`, a: num(dist) + " m",
+      w: [[num(dist / 2) + " m", "One revolution covers the circumference 2πr, not πr."], [num(dist * 100) + " m", "Convert cm to m."], [num(22 / 7 * r * r * revs / 10000) + " m", "Use the circumference, not the area."]],
+      s: [`Circumference = 2 × 22/7 × ${r} = ${num(2 * 22 / 7 * r)} cm.`, `Distance = ${revs} × ${num(2 * 22 / 7 * r)} cm = ${num(dist)} m.`], r: "Distance per revolution = circumference."}; });
+  // Surface areas and volumes
+  T(MA, "Surface Areas and Volumes", H, 6, () => { const R = pick([6, 8, 9, 10, 12]), r = pick([1, 2, 3]); if(R % r) return null; const n = (R / r) ** 3;
+    return {q: `A metallic sphere of radius ${R} cm is melted and recast into small spheres of radius ${r} cm each. The number of small spheres is:`, a: String(n),
+      w: [[String((R / r) ** 2), "Volume goes as r³, not r²."], [String(R / r), "Compare volumes (r³)."], [String(n / 2), "No metal is lost when recasting."]],
+      s: ["Number = volume of big sphere ÷ volume of one small sphere.", `= (4/3)π${R}³ ÷ (4/3)π${r}³ = (${R}/${r})³ = ${n}.`], r: "Melting and recasting keeps the volume the same."}; });
+  T(MA, "Surface Areas and Volumes", H, 6, () => { const r = pick([3.5, 7]), hc = pick([12, 24]), l = Math.sqrt(r * r + hc * hc), A = 22 / 7 * r * l + 2 * 22 / 7 * r * r; if(!Number.isInteger(l * 2)) return null;
+    return {q: `A toy is a cone of radius ${r} cm and height ${hc} cm mounted on a hemisphere of the same radius. Its total surface area is (π = 22/7):`, a: num(A) + " cm²",
+      w: [[num(A + 22 / 7 * r * r) + " cm²", "The flat circular face is hidden where the cone meets the hemisphere; don't add it."], [num(22 / 7 * r * hc + 2 * 22 / 7 * r * r) + " cm²", "Use the slant height l = √(r² + h²), not h."], [num(22 / 7 * r * l + 4 * 22 / 7 * r * r) + " cm²", "A hemisphere's curved surface is 2πr², not 4πr²."]],
+      s: [`Slant height l = √(${r}² + ${hc}²) = ${num(l)} cm.`, `CSA cone = πrl = ${num(22 / 7 * r * l)} cm²; CSA hemisphere = 2πr² = ${num(2 * 22 / 7 * r * r)} cm².`, `Total = ${num(A)} cm².`], r: "Combined solids: add only the outside surfaces."}; });
+  T(MA, "Surface Areas and Volumes", H, 6, () => { const r = pick([3, 4, 6]), h = pick([7, 10, 14, 21]), R = pick([3, 6, 9]); const H2 = r * r * h * 3 / (R * R); if(!Number.isInteger(H2 * 2)) return null;
+    return {q: `A solid cylinder of radius ${r} cm and height ${h} cm is melted and recast into a cone of radius ${R} cm. The height of the cone is:`, a: num(H2) + " cm",
+      w: [[num(H2 / 3) + " cm", "A cone's volume has the factor ⅓, so its height is 3 times larger."], [num(r * h / R) + " cm", "Square the radii in the volume formulas."], [num(H2 * 3) + " cm", "Volume of cone = ⅓πR²H, solve for H."]],
+      s: ["Volume is conserved: πr²h = ⅓πR²H.", `H = 3r²h/R² = 3 × ${r}² × ${h}/${R}² = ${num(H2)} cm.`], r: "Recasting: equate the volumes."}; });
+  // Statistics (grouped data)
+  T(MA, "Statistics", H, 6, () => { const w = 10, f = shuf([[4, 6, 10, 8, 2], [3, 7, 12, 5, 3], [5, 8, 15, 7, 5], [2, 6, 9, 5, 3]])[0], lo = pick([0, 10, 20]); const x = f.map((_, i) => lo + w * i + 5), N = f.reduce((a, b) => a + b, 0), mean = f.reduce((s, fi, i) => s + fi * x[i], 0) / N;
+    return {q: `Find the mean of the data: classes ${f.map((_, i) => `${lo + w * i}–${lo + w * (i + 1)}`).join(", ")} with frequencies ${f.join(", ")}.`, a: num(mean, 2),
+      w: [[num(x.reduce((a, b) => a + b, 0) / 5, 2), "Weight each class mark by its frequency."], [num(f.reduce((s, fi, i) => s + fi * (lo + w * i), 0) / N, 2), "Use the class marks (mid-points), not the lower limits."], [num(mean + 5, 2), "Recompute Σfx / Σf."]],
+      s: [`Class marks: ${x.join(", ")}.`, `Σf = ${N}, Σfx = ${f.reduce((s, fi, i) => s + fi * x[i], 0)}.`, `Mean = Σfx/Σf = ${num(mean, 2)}.`], r: "Grouped mean = Σfᵢxᵢ / Σfᵢ with xᵢ the class marks."}; });
+  T(MA, "Statistics", H, 6, () => { const w = 10, f = shuf([[5, 8, 20, 12, 5], [6, 10, 16, 10, 8], [4, 9, 18, 10, 9], [3, 8, 14, 9, 6]])[0], lo = pick([0, 10, 20]); const N = f.reduce((a, b) => a + b, 0);
+    let cf = 0, k = 0; while(cf + f[k] < N / 2){ cf += f[k]; k++; } const l = lo + w * k, med = l + (N / 2 - cf) / f[k] * w;
+    return {q: `Find the median of the data: classes ${f.map((_, i) => `${lo + w * i}–${lo + w * (i + 1)}`).join(", ")} with frequencies ${f.join(", ")}.`, a: num(med, 2),
+      w: [[num(l + (N / 2) / f[k] * w, 2), "Subtract the cumulative frequency before the median class."], [num(l + w / 2, 2), "Use the formula l + [(n/2 − cf)/f] × h."], [num(l + (N / 2 - cf) / N * w, 2), "Divide by the frequency of the median class, not n."]],
+      s: [`n = ${N}, n/2 = ${N / 2}. Median class: ${l}–${l + w} (cf before it = ${cf}, f = ${f[k]}).`, `Median = ${l} + [(${N / 2} − ${cf})/${f[k]}] × ${w} = ${num(med, 2)}.`], r: "Median = l + [(n/2 − cf)/f] × h."}; });
+  T(MA, "Statistics", H, 6, () => { const w = 10, f = shuf([[3, 8, 15, 10, 4], [5, 12, 18, 7, 3], [2, 9, 14, 11, 6], [6, 10, 22, 12, 5]])[0], lo = pick([0, 10, 20]); let k = f.indexOf(Math.max(...f)); if(k === 0 || k === 4) return null;
+    const l = lo + w * k, f1 = f[k], f0 = f[k - 1], f2 = f[k + 1], mode = l + (f1 - f0) / (2 * f1 - f0 - f2) * w;
+    return {q: `Find the mode of the data: classes ${f.map((_, i) => `${lo + w * i}–${lo + w * (i + 1)}`).join(", ")} with frequencies ${f.join(", ")}.`, a: num(mode, 2),
+      w: [[num(l + (f1 - f0) / (f1 - f2) * w, 2), "The denominator is 2f₁ − f₀ − f₂."], [num(l + w / 2, 2), "Use the mode formula, not the class mark."], [num(l + (f1 - f2) / (2 * f1 - f0 - f2) * w, 2), "The numerator is f₁ − f₀ (the class before)."]],
+      s: [`Modal class: ${l}–${l + w} (f₁ = ${f1}, f₀ = ${f0}, f₂ = ${f2}).`, `Mode = ${l} + [(${f1} − ${f0})/(2×${f1} − ${f0} − ${f2})] × ${w} = ${num(mode, 2)}.`], r: "Mode = l + [(f₁ − f₀)/(2f₁ − f₀ − f₂)] × h."}; });
+  // Probability
+  [["a red face card", 6, 52], ["a black king or a red queen", 4, 52], ["neither a heart nor a king", 36, 52], ["a spade or an ace", 16, 52]].forEach(([e, a, b]) => T(MA, "Probability", H, 1, () => ({q: `One card is drawn from a well-shuffled deck of 52 cards. The probability of getting ${e} is:`, a: frac(a, b),
+    w: [[frac(a + 1, b), "Check for overlap (e.g. the ace of spades is counted once)."], [frac(b - a, b), "That is the complement."], [frac(a, 13), "The total is 52 cards."]],
+    s: [`Favourable cards = ${a}.`, `P = ${a}/52 = ${frac(a, b)}.`], r: "Count carefully; don't double-count overlapping cards."})));
+  [["a doublet", 6], ["a sum of at least 10", 6], ["a product that is a perfect square", 8], ["a sum that is a prime number", 15]].forEach(([e, n]) => T(MA, "Probability", H, 1, () => ({q: `Two dice are thrown together. The probability of getting ${e} is:`, a: frac(n, 36),
+    w: [[frac(n, 12), "There are 6 × 6 = 36 outcomes."], [frac(36 - n, 36), "That is the complement."], [frac(n + 1, 36), "List the outcomes systematically."]],
+    s: ["Total outcomes = 36.", `Favourable outcomes = ${n}.`, `P = ${frac(n, 36)}.`], r: "List ordered pairs (a, b) for two dice."})));
+
+  // ===== SCIENCE: Electricity =====
+  T(SC, "Electricity", H, 8, () => { const a = ri(2, 6) * 2, b = ri(2, 6) * 2, c = ri(2, 6) * 2, d = ri(2, 6) * 2, V = pick([6, 12, 24]), p1 = a * b / (a + b), p2 = c * d / (c + d), R = p1 + p2;
+    return {q: `Two pairs of resistors (${a} Ω ∥ ${b} Ω) and (${c} Ω ∥ ${d} Ω) are connected in series across ${V} V. The current drawn is:`, a: num(V / R, 2) + " A",
+      w: [[num(V / (a + b + c + d), 2) + " A", "Each pair is in parallel; combine them first."], [num(V / (1 / (1 / a + 1 / b + 1 / c + 1 / d)), 2) + " A", "The two pairs are in series with each other."], [num(V * R / 10, 2) + " A", "I = V/R."]],
+      s: [`${a} ∥ ${b} = ${num(p1, 2)} Ω; ${c} ∥ ${d} = ${num(p2, 2)} Ω.`, `Total = ${num(R, 2)} Ω.`, `I = ${V}/${num(R, 2)} = ${num(V / R, 2)} A.`], r: "Simplify parallel groups first, then add series parts."}; });
+  T(SC, "Electricity", H, 6, () => { const I = pick([2, 3, 4, 5]), R = pick([5, 10, 20, 50]), t = pick([30, 60, 120, 300]), Hh = I * I * R * t;
+    return {q: `A current of ${I} A flows through a ${R} Ω resistor for ${t} s. The heat produced is:`, a: (Hh >= 1000 ? num(Hh / 1000, 1) + " kJ" : Hh + " J"),
+      w: [[(I * R * t >= 1000 ? num(I * R * t / 1000, 1) + " kJ" : I * R * t + " J"), "H = I²Rt: square the current."], [(I * I * R >= 1000 ? num(I * I * R / 1000, 1) + " kJ" : I * I * R + " J"), "Multiply by the time."], [(Hh * 2 >= 1000 ? num(Hh * 2 / 1000, 1) + " kJ" : Hh * 2 + " J"), "There's no factor 2 in Joule's law."]],
+      s: ["Joule's law: H = I²Rt.", `H = ${I}² × ${R} × ${t} = ${Hh} J.`], r: "Heat = I²Rt (in joules when SI units are used)."}; });
+  T(SC, "Electricity", H, 6, () => { const r = pick([1, 2, 3]), L = pick([2, 3, 4]), R = 4 * L / (r * r) * 1; const Rn = R / (L * L / 1) * 1;
+    return {q: `A wire of resistance ${num(R, 2)} Ω is cut into ${L} equal parts, which are then joined in parallel. The equivalent resistance is:`, a: num(R / (L * L), 2) + " Ω",
+      w: [[num(R / L, 2) + " Ω", "Each part has R/" + L + "; then " + L + " of them in parallel divide by " + L + " again."], [num(R * L, 2) + " Ω", "Parallel combination lowers resistance."], [num(R, 2) + " Ω", "Cutting and rejoining in parallel changes R."]],
+      s: [`Each piece: ${num(R, 2)}/${L} = ${num(R / L, 2)} Ω.`, `${L} equal resistors in parallel: (${num(R / L, 2)})/${L} = ${num(R / (L * L), 2)} Ω.`], r: "n equal pieces in parallel: R/n²."}; });
+  // ===== SCIENCE: Light =====
+  T(SC, "Light – Reflection and Refraction", H, 8, () => { const f = pick([10, 15, 20, 25]), u = pick([15, 20, 30, 40, 60]), h = pick([2, 3, 4, 5]); if(u <= f) return null; const v = u * f / (u - f), m = v / (-u), hi = m * h;
+    return {q: `A ${h} cm tall object is placed ${u} cm from a convex lens of focal length ${f} cm. The height of the image is:`, a: num(hi, 2) + " cm",
+      w: [[num(-hi, 2) + " cm", "A real image formed by a convex lens is inverted: negative height."], [num(h * f / u, 2) + " cm", "Find v first: 1/v − 1/u = 1/f, then m = v/u."], [num(h * u / v, 2) + " cm", "m = v/u, not u/v."]],
+      s: [`1/v = 1/f + 1/u = 1/${f} − 1/${u} ⇒ v = ${num(v, 2)} cm.`, `m = v/u = ${num(v, 2)}/(−${u}) = ${num(m, 3)}.`, `h′ = m × h = ${num(hi, 2)} cm (inverted).`], r: "Lens: 1/v − 1/u = 1/f, m = v/u = h′/h."}; });
+  T(SC, "Light – Reflection and Refraction", H, 6, () => { const n1 = pick([[1.33, 225], [1.5, 200], [2.42, 124]]), n2 = pick([[1.33, 225], [1.5, 200], [2.42, 124]]); if(n1 === n2) return null;
+    return {q: `The refractive indices of two media are ${n1[0]} and ${n2[0]}. The refractive index of the second medium with respect to the first is:`, a: num(n2[0] / n1[0], 2),
+      w: [[num(n1[0] / n2[0], 2), "n₂₁ = n₂/n₁ (second over first)."], [num(n2[0] - n1[0], 2), "Relative refractive index is a ratio, not a difference."], [num(n1[0] * n2[0], 2), "Divide, don't multiply."]],
+      s: ["n₂₁ = n₂/n₁ = v₁/v₂.", `n₂₁ = ${n2[0]}/${n1[0]} = ${num(n2[0] / n1[0], 2)}.`], r: "Relative refractive index n₂₁ = n₂/n₁."}; });
+  T(SC, "Light – Reflection and Refraction", H, 6, () => { const f1 = pick([20, 25, 50]), f2 = pick([-50, -100, 40, 100]), P = 100 / f1 + 100 / f2;
+    return {q: `Lenses of focal lengths ${f1} cm and ${f2} cm are placed in contact. The focal length of the combination is:`, a: num(100 / P, 1) + " cm",
+      w: [[num(f1 + f2, 1) + " cm", "Powers add, not focal lengths."], [num(P, 1) + " cm", "That is the power in dioptres; f = 100/P cm."], [num(f1 * f2 / (f1 - f2), 1) + " cm", "1/f = 1/f₁ + 1/f₂ (plus, with signs)."]],
+      s: [`P = 100/${f1} + 100/(${f2}) = ${num(P, 2)} D.`, `f = 100/P = ${num(100 / P, 1)} cm.`], r: "Lenses in contact: P = P₁ + P₂."}; });
 }
 
 // ================= CLASS SWITCH (top-level context) =================
