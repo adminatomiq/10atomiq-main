@@ -51,6 +51,7 @@
 
 .ncert-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .ncert-row .chip{font-size:.75rem;padding:5px 10px}
+.rvw2.rec .rvk{background:var(--accent);color:#fff;font-size:.8rem}
 /* ---- Past results ---- */
 .hs-head{padding:18px 18px 16px;margin-bottom:12px}
 .hs-head h2{font-size:1.45rem;margin:0 0 4px}
@@ -9925,6 +9926,11 @@ function reviewList(){
   state._rvCtx = past ? {cls: state.hist.open.cls, subject: state.hist.open.s, chapter: state.hist.open.c} : null;
   const items = qs.map((q, i) => ({q, i, yours: ans[i], ok: ans[i] === q.ans})).filter(x => f === "all" || !x.ok);
   if(!items.length) return `<div class="card rvw-empty">🎉 No wrong answers in this set. Tap <b>All questions</b> to read the solutions anyway.</div>`;
+  if(pastRecovered()) return qs.map((q, i) => `<div class="card rvw2 rec">
+      <div class="rv-h"><span class="rvk" aria-hidden="true">${i + 1}</span><div class="rv-q"><small>Question ${i + 1} · ${esc(q.diff || "")}</small><div>${q.q}</div></div></div>
+      <div class="rv-opts">${q.opts.map((o, k) => `<div class="rv-o${k === q.ans ? " right" : ""}"><span>${String.fromCharCode(65 + k)}</span><div>${o}</div>${k === q.ans ? `<em>Correct</em>` : ""}</div>`).join("")}</div>
+      <details class="sol-d"><summary>Show solution</summary>${solutionHtml(q, undefined, false)}</details>
+    </div>`).join("");
   return items.map(({q, i, yours, ok}) => {
     const skipped = yours === undefined;
     return `<div class="card rvw2 ${ok ? "ok" : skipped ? "skip" : "bad"}">
@@ -9974,12 +9980,37 @@ function pastList(){
   (state.prof.scores || []).forEach(sc => { if(sc.rid && byId.has(sc.rid)) return; const d = tsDate(sc.ts);
     if(!d || out.some(r => r.s === sc.subject && r.c === sc.chapter && Math.abs(r.ts - d.getTime()) < 120000)) return;
     out.push({id: "s" + d.getTime() + sc.chapter, ts: d.getTime(), cls: state.cls, s: sc.subject, c: sc.chapter, correct: sc.correct, total: sc.total, scoreOnly: true}); });
-  return out.sort((a, b) => b.ts - a.ts);
+  out.sort((a, b) => b.ts - a.ts);
+  recoverOld(out);
+  return out;
+}
+// Tests from before Past results existed only saved a score. Their questions can still be found: after every test the app
+// appended that test's question IDs to the chapter's "seen" list (newest last). Walking that list back from the end, newest
+// test first, gives each old test's questions. The answers picked were never saved, so these show questions + solutions only.
+const _bankIds = new Map();
+function bankById(s, c){
+  const k = state.cls + "|" + s + "|" + c; if(_bankIds.has(k)) return _bankIds.get(k);
+  const m = new Map(); (BANK[s] && BANK[s].chapters[c] || []).forEach(q => m.set(qid(q), q)); _bankIds.set(k, m); return m;
+}
+function recoverOld(list){
+  const groups = new Map();
+  list.forEach(r => { const g = r.s + "|" + r.c; if(!groups.has(g)) groups.set(g, []); groups.get(g).push(r); });   // newest first
+  groups.forEach(rs => {
+    if(!rs.some(r => r.scoreOnly)) return;
+    const s = rs[0].s, c = rs[0].c, bank = bankById(s, c);
+    const newer = new Set(); rs.filter(r => !r.scoreOnly).forEach(r => r.items.forEach(it => newer.add(it.i)));
+    const ids = (state.seen[seenKey(s, c)] || []).filter(id => !newer.has(id));
+    rs.filter(r => r.scoreOnly).forEach(r => {
+      const take = ids.splice(Math.max(0, ids.length - (r.total || 0)));
+      r.items = take.map(id => bank.get(id)).filter(Boolean).map(q => ({i: qid(q), q: q.q, o: q.opts.slice(), a: q.ans, y: -2, d: q.diff || ""}));
+      r.recovered = r.items.length > 0;
+    });
+  });
 }
 function openHistory(){ state.hist.open = null; nav("history"); }
 function openPast(id){
-  const r = pastList().find(x => x.id === id); if(!r || r.scoreOnly) return;
-  state.hist.open = r; state.rvFilter = r.items.some(it => it.y !== it.a) ? "wrong" : "all";
+  const r = pastList().find(x => x.id === id); if(!r || (r.scoreOnly && !r.recovered)) return;
+  state.hist.open = r; state.rvFilter = r.recovered ? "all" : r.items.some(it => it.y !== it.a) ? "wrong" : "all";
   state.view = "past"; _navTok++; window.scrollTo(0, 0); render();
 }
 function backToHistory(){ state.hist.open = null; state.view = "history"; state._back = 1; _navTok++; window.scrollTo(0, 0); render(); }
@@ -9990,6 +10021,7 @@ function pastQuestions(r){
   return r.items.map(it => { const b = bank.get(it.i); return b ? {...b, id: it.i, opts: it.o, ans: it.a} : {q: it.q, opts: it.o, ans: it.a, diff: it.d, id: it.i}; });
 }
 function pastAnswers(r){ const a = {}; r.items.forEach((it, i) => { if(it.y >= 0) a[i] = it.y; }); return a; }
+const pastRecovered = () => state.view === "past" && state.hist.open && state.hist.open.recovered;
 const pctColor = p => p >= 75 ? "var(--ok, #10b981)" : p >= 50 ? "#8b5cf6" : p >= 35 ? "#f59e0b" : "#f43f5e";
 function dayLabel(ts){
   const d = new Date(ts), t = new Date(); t.setHours(0, 0, 0, 0); const dd = new Date(d); dd.setHours(0, 0, 0, 0);
@@ -10007,10 +10039,10 @@ function renderHistory(){
     const day = dayLabel(r.ts), pct = Math.round(r.correct / r.total * 100);
     if(day !== lastDay){ rows += `<div class="hs-day">${day}</div>`; lastDay = day; }
     const inner = `<span class="hs-dot" style="--c:${subjColor(r.s)}" aria-hidden="true">${BANK[r.s] ? BANK[r.s].icon : "📘"}</span>
-      <span class="hs-main"><b>${esc(r.c)}</b><small>${esc(r.s)}${r.f && FILTER_LABEL[r.f] ? " · " + FILTER_LABEL[r.f] : ""} · ${timeLabel(r.ts)}${r.used ? " · ⏱ " + fmtTime(r.used) : ""}${r.scoreOnly ? " · score only" : ""}</small></span>
+      <span class="hs-main"><b>${esc(r.c)}</b><small>${esc(r.s)}${r.f && FILTER_LABEL[r.f] ? " · " + FILTER_LABEL[r.f] : ""} · ${timeLabel(r.ts)}${r.used ? " · ⏱ " + fmtTime(r.used) : ""}${r.recovered ? " · questions only" : r.scoreOnly ? " · score only" : ""}</small></span>
       <span class="hs-score" style="--c:${pctColor(pct)}"><b>${pct}%</b><small>${r.correct}/${r.total}</small></span>
-      <span class="hs-go" aria-hidden="true">${r.scoreOnly ? "" : "→"}</span>`;
-    rows += r.scoreOnly ? `<div class="card hs-row so" style="--k:${Math.min(k, 12)}" title="Taken before detailed review was available">${inner}</div>`
+      <span class="hs-go" aria-hidden="true">${r.scoreOnly && !r.recovered ? "" : "→"}</span>`;
+    rows += r.scoreOnly && !r.recovered ? `<div class="card hs-row so" style="--k:${Math.min(k, 12)}" title="Taken before detailed review was available">${inner}</div>`
       : `<button class="card hs-row" style="--k:${Math.min(k, 12)}" data-id="${esc(r.id)}" onclick="openPast(this.dataset.id)">${inner}</button>`;
   });
   const loading = !state.guest && (state.hist.loading || !state.hist.remote);
@@ -10021,23 +10053,25 @@ function renderHistory(){
   ${subs.length > 1 ? `<div class="hs-f" role="group" aria-label="Subject">${["all"].concat(subs).map(s => `<button class="chip ${f === s ? "on" : ""}" data-f="${esc(s)}" onclick="setHistFilter(this.dataset.f)">${s === "all" ? "All subjects" : esc(s)}</button>`).join("")}</div>` : ""}
   ${rows || (loading ? `<div class="card hs-empty">Loading your results…</div>` : `<div class="card hs-empty">No tests yet. Finish a test and it will appear here for review.<br><button class="btn btn-primary" onclick="nav('home')">Start a test</button></div>`)}
   ${state.guest && n ? `<p class="hs-note">Practice mode: these results are kept on this device only. Log in to keep them on every device.</p>` : ""}
-  ${all.some(r => r.scoreOnly) ? `<p class="hs-note">“Score only” tests were taken before detailed review was added, so their questions weren't saved.</p>` : ""}`;
+  ${all.some(r => r.recovered) ? `<p class="hs-note">“Questions only”: tests taken before 2 Nov 2026. Their questions and solutions were recovered from your progress, but the answers you picked weren't saved back then.</p>` : ""}
+  ${all.some(r => r.scoreOnly && !r.recovered) ? `<p class="hs-note">“Score only”: an older test whose questions couldn't be matched (for example, it was taken on another account or the questions have changed).</p>` : ""}`;
 }
 function renderPast(){
   const r = state.hist.open; if(!r) return renderHistory();
-  const pct = Math.round(r.correct / r.total * 100), skipped = r.items.filter(it => it.y < 0).length, wrong = r.total - r.correct - skipped;
+  const pct = Math.round(r.correct / r.total * 100), skipped = r.recovered ? 0 : r.items.filter(it => it.y < 0).length, wrong = r.total - r.correct - skipped;
   const nWrong = wrong + skipped, d = new Date(r.ts);
   return `${header("profile")}
   <button class="chip hs-back" onclick="backToHistory()">← All past results</button>
   <div class="card hs-sum" style="--c:${pctColor(pct)}">
     <div class="hs-big"><b>${pct}%</b><small>${r.correct}/${r.total}</small></div>
     <div><h2 class="disp">${esc(r.c)}</h2><p>${esc(r.s)} · ${d.toLocaleDateString(undefined, {weekday: "short", day: "numeric", month: "short", year: "numeric"})}, ${timeLabel(r.ts)}</p>
-      <div class="rchips"><span class="ok">✓ ${r.correct} correct</span><span class="bad">✗ ${wrong} wrong</span><span>${skipped} skipped</span>${r.used ? `<span>⏱ ${fmtTime(r.used)}</span>` : ""}</div>
+      <div class="rchips"><span class="ok">✓ ${r.correct} correct</span><span class="bad">✗ ${r.recovered ? r.total - r.correct + " wrong or skipped" : wrong + " wrong"}</span>${r.recovered ? "" : `<span>${skipped} skipped</span>`}${r.used ? `<span>⏱ ${fmtTime(r.used)}</span>` : ""}</div>
       ${BANK[r.s] && BANK[r.s].chapters[r.c] ? `<button class="btn btn-primary" data-s="${esc(r.s)}" data-c="${esc(r.c)}" onclick="startExam(this.dataset.s,this.dataset.c)">Practise this chapter again</button>` : ""}</div>
   </div>
-  <div class="rv-top"><h3 class="font-bold text-xl">Review &amp; solutions</h3><div class="rvf" role="group" aria-label="Show">
+  ${r.recovered ? `<div class="rv-top"><h3 class="font-bold text-xl">Questions &amp; solutions</h3></div>
+  <p class="rv-hint">This test was taken before answers were saved, so your picks can't be shown. Here are its ${r.items.length} questions with the correct answers and full solutions${r.items.length < r.total ? ` (${r.total - r.items.length} couldn't be recovered because they came up again in a later test)` : ""}.</p>` : `<div class="rv-top"><h3 class="font-bold text-xl">Review &amp; solutions</h3><div class="rvf" role="group" aria-label="Show">
     <button class="chip ${state.rvFilter === "wrong" ? "on" : ""}" data-f="wrong" onclick="setReviewFilter('wrong')">Wrong &amp; skipped (${nWrong})</button>
-    <button class="chip ${state.rvFilter === "all" ? "on" : ""}" data-f="all" onclick="setReviewFilter('all')">All questions</button></div></div>
+    <button class="chip ${state.rvFilter === "all" ? "on" : ""}" data-f="all" onclick="setReviewFilter('all')">All questions</button></div></div>`}
   <div id="rvList">${reviewList()}</div>`;
 }
 
