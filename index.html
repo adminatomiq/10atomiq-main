@@ -758,6 +758,15 @@ button,a{touch-action:manipulation;-webkit-user-select:none;user-select:none;-we
 .ntoc{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:2px 2px 10px;margin:0 -2px 6px;position:sticky;top:calc(64px + env(safe-area-inset-top,0px));z-index:12;background:linear-gradient(var(--bg) 70%,transparent)}
 .ntoc::-webkit-scrollbar{display:none}.ntoc .chip{flex:none;font-size:.8rem;padding:.35rem .8rem;white-space:nowrap}
 .nsec{margin-bottom:12px;scroll-margin-top:130px}
+.nex{border:1px solid color-mix(in srgb,var(--sc,var(--accent)) 30%,var(--border));border-radius:14px;padding:12px 14px;margin:0 0 10px;background:color-mix(in srgb,var(--sc,var(--accent)) 7%,transparent);overflow-wrap:anywhere}
+.nex:last-child{margin-bottom:0}
+.nex-q{line-height:1.6;font-weight:600}
+.nex-n{display:block;font-size:.7rem;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--sc,var(--accent));margin-bottom:3px}
+.nex-s summary{cursor:pointer;margin-top:8px;font-size:.86rem;font-weight:800;color:var(--sc,var(--accent));list-style:none;display:inline-flex;align-items:center;gap:6px;padding:6px 0;min-height:32px}
+.nex-s summary::-webkit-details-marker{display:none}
+.nex-s summary::before{content:"▸";transition:transform .2s}.nex-s[open] summary::before{transform:rotate(90deg)}
+.nex-s[open] summary{color:var(--muted)}
+.nex-s ol{list-style:decimal;margin:6px 0 0;padding-left:1.25rem;line-height:1.65}.nex-s li::marker{color:var(--sc,var(--accent));font-weight:800}.nex-s li{margin:4px 0}.nex-s li b{font-weight:800}
 .ntoc .chip.on{background:var(--btn);color:#fff;border-color:transparent}
 .nnum{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;font:800 .7rem Figtree,sans-serif;font-style:normal;color:#fff;background:var(--sc,var(--accent))}
 .ntoc .nnum{width:17px;height:17px;font-size:.62rem}.ntoc .chip.on .nnum{background:rgba(255,255,255,.3)}
@@ -1699,9 +1708,9 @@ function allQuestionsFor(subject, chapter){
   return BANK[subject].chapters[chapter] || [];
 }
 
-// Optional filter for a set: "ncert" (NCERT exercise problems only) or "ncertMisc" (Miscellaneous exercise only).
+// Optional filter for a set: "ncert" (NCERT textbook and exercise questions only) or "ncertMisc" (Miscellaneous exercise only).
 const EXAM_FILTERS = {ncert: q => /^NCERT · /.test(q.tag || ""), ncertMisc: q => /^NCERT · Miscellaneous/.test(q.tag || "")};
-const FILTER_LABEL = {ncert: "NCERT exercises", ncertMisc: "NCERT Miscellaneous"};
+const FILTER_LABEL = {ncert: "NCERT questions", ncertMisc: "NCERT Miscellaneous"};
 function startExam(subject, chapter, minutesOverride, filter){
   const pz = getPaused(); if(pz && pz.s === subject && pz.c === chapter && (pz.f || null) === (filter || null)) return resumeExam();   // a paused test for this chapter: carry on with it
   state.examFilter = EXAM_FILTERS[filter] ? filter : null;
@@ -3617,17 +3626,20 @@ function closeRx(fromPop){
 const isSectioned = d => Array.isArray(d) && d.length > 0 && Array.isArray(d[0]);
 const notesCount = d => isSectioned(d) ? d.reduce((a, [, pts]) => a + pts.length, 0) : (d || []).length;
 const notesMeta = d => isSectioned(d) ? `${d.length} sections · ${notesCount(d)} points` : `${notesCount(d)} key points`;
-const NSEC_IC = [[/formula|equation|law/i, "📐"], [/defin|term/i, "📖"], [/exam|tip|mistake|board|jee|neet/i, "🎯"], [/diagram|experiment|activity/i, "🔬"], [/example|application|real/i, "🌍"], [/date|timeline|event/i, "🗓️"], [/summary|character|theme/i, "🧩"]];
+const NSEC_IC = [[/ncert/i, "📘"], [/formula|equation|law/i, "📐"], [/defin|term/i, "📖"], [/exam|tip|mistake|board|jee|neet/i, "🎯"], [/diagram|experiment|activity/i, "🔬"], [/example|application|real/i, "🌍"], [/date|timeline|event/i, "🗓️"], [/summary|character|theme/i, "🧩"]];
 const nsecIcon = (h, i) => { const m = NSEC_IC.find(([r]) => r.test(h)); return m ? m[1] : `<i class="nnum">${i + 1}</i>`; };
 function notePoint(x){
   const m = /^([^:.]{2,60}):\s(.+)$/s.exec(x);
   return m ? `<b>${escapeHtml(m[1])}:</b> ${escapeHtml(m[2])}` : escapeHtml(x);
 }
+// NCERT solved example: {ex: "question", sol: ["step", …]}. The solution stays folded until the student opens it.
+const exHtml = (x, k) => `<div class="nex" style="--k:${k}"><div class="nex-q"><span class="nex-n">Example ${k + 1}</span>${escapeHtml(x.ex)}</div><details class="nex-s"><summary>Show solution</summary><ol>${(x.sol || []).map(t => `<li>${notePoint(t)}</li>`).join("")}</ol></details></div>`;
+const ptHtml = (x, k) => typeof x === "string" ? `<p style="--k:${k}">${notePoint(x)}</p>` : exHtml(x, k);
 function notesHtml(d, sc){
-  if(!isSectioned(d)) return `<div class="card notes" style="--sc:${sc}">${(d||[]).map((x,k)=>`<p style="--k:${k}">${notePoint(x)}</p>`).join("")}</div>`;
+  if(!isSectioned(d)) return `<div class="card notes" style="--sc:${sc}">${(d||[]).map(ptHtml).join("")}</div>`;
   const toc = d.length > 2 ? `<nav class="ntoc" aria-label="Sections">${d.map(([h], i) => `<button class="chip" data-i="${i}" onclick="jumpNote(${i})">${nsecIcon(h, i)} ${escapeHtml(h)}</button>`).join("")}</nav>` : "";
   return `<p class="nmeta">${notesMeta(d)}</p>${toc}${d.map(([h, pts], i) => `<section class="card notes nsec${i > 1 ? " lazy" : ""}" id="nsec${i}" style="--sc:${sc}">
-    <h3><span aria-hidden="true">${nsecIcon(h, i)}</span> ${escapeHtml(h)}</h3>${pts.map((x, k) => `<p style="--k:${k}">${notePoint(x)}</p>`).join("")}</section>`).join("")}`;
+    <h3><span aria-hidden="true">${nsecIcon(h, i)}</span> ${escapeHtml(h)}</h3>${pts.map(ptHtml).join("")}</section>`).join("")}`;
 }
 function jumpNote(i){
   const el = document.getElementById("nsec" + i); if(!el) return;
@@ -3665,7 +3677,7 @@ function renderStudy(){
   }
   return `${header(m)}${studyTabs(m)}
   <div class="sh-title mb-1"><span class="ic" aria-hidden="true">${isN?'📝':'📐'}</span><h2 class="text-2xl font-bold">${isN?'Revision Notes':'Formula Sheet'}</h2></div>
-  <p class="mb-4 text-sm" style="color:var(--muted)">${isN?'Detailed chapter-wise notes: concepts, definitions, formulae and exam tips, section by section.':'Chapter-wise formulae. Only chapters that need formulae are listed.'}</p>
+  <p class="mb-4 text-sm" style="color:var(--muted)">${isN?'Detailed chapter-wise notes: concepts, definitions, formulae, NCERT solved examples and exam tips, section by section.':'Chapter-wise formulae. Only chapters that need formulae are listed.'}</p>
   <div class="flex gap-2 mb-4" style="flex-wrap:wrap">${chips}</div>${body}`;
 }
 
@@ -11430,6 +11442,1238 @@ function EXTRA10(h){
       s: [`P = 100/${f1} + 100/(${f2}) = ${num(P, 2)} D.`, `f = 100/P = ${num(100 / P, 1)} cm.`], r: "Lenses in contact: P = P₁ + P₂."}; });
 }
 
+// ================= NCERT SOLVED EXAMPLES + NCERT QUESTIONS (Class 10 and Class 12) =================
+// Per chapter: ex = worked examples shown in the revision notes (question + step-by-step solution, folded),
+//              q  = NCERT textbook-based MCQs added to the chapter bank (tag "NCERT · Textbook based", so the
+//                   "📘 NCERT questions" button on the chapter list picks them up).
+//   ex: [question, [steps…]]        q: [question, [options], correct index, "E"|"M"|"H", explanation]
+// Written in the style of NCERT in-text examples and exercises, in our own words.
+const NCERT_DATA = {"12": {}, "10": {}};
+function NC(cls, subj, chs){ NCERT_DATA[cls][subj] = Object.assign(NCERT_DATA[cls][subj] || {}, chs); }
+// Class 12 Physics: NCERT-based solved examples (ex) and questions (q).
+// ex: [question, [steps…]]   q: [question, [options], correct index, "E"|"M"|"H", explanation]
+NC("12","Physics",{
+"Electric Charges and Fields":{ex:[
+ ["Two small charged spheres carry 2 × 10⁻⁷ C and 3 × 10⁻⁷ C and are 30 cm apart in air. Find the force between them.",["Coulomb's law: F = kq₁q₂/r², with k = 9 × 10⁹ N m² C⁻².","F = 9 × 10⁹ × (2 × 10⁻⁷)(3 × 10⁻⁷) / (0.3)² = 9 × 10⁹ × 6 × 10⁻¹⁴ / 0.09.","Answer: F = 6 × 10⁻³ N. Both charges are positive, so the force is repulsive."]],
+ ["How many electrons make up a charge of −1 C?",["Charge is quantised: q = ne, with e = 1.6 × 10⁻¹⁹ C.","n = q/e = 1 / (1.6 × 10⁻¹⁹).","Answer: n = 6.25 × 10¹⁸ electrons."]],
+ ["Two charges ±10 μC are 5 mm apart. Find the field at a point on the axis 15 cm from the centre of the dipole.",["Dipole moment p = q × 2a = 10 × 10⁻⁶ × 5 × 10⁻³ = 5 × 10⁻⁸ C m.","The point is far away (r ≫ 2a), so on the axis E = 2kp/r³.","E = 2 × 9 × 10⁹ × 5 × 10⁻⁸ / (0.15)³ = 900 / 3.375 × 10⁻³.","Answer: E ≈ 2.7 × 10⁵ N C⁻¹, along the dipole moment (from −q to +q)."]],
+ ["A uniform field E = 3 × 10³ î N C⁻¹ passes through a square of side 10 cm whose plane is parallel to the yz-plane. Find the flux.",["The square's normal is along x, the same direction as E, so θ = 0°.","φ = EA cos θ = 3 × 10³ × (0.1)² × 1.","Answer: φ = 30 N m² C⁻¹."]]],
+q:[
+ ["The total electric flux through a closed surface enclosing a charge q in vacuum is:",["qε₀","q/ε₀","ε₀/q","Zero"],1,"E","Gauss's law: φ = q_enclosed / ε₀. Charges outside the surface add nothing to the net flux."],
+ ["Which of these cannot be the charge on a body?",["1.6 × 10⁻¹⁹ C","3.2 × 10⁻¹⁹ C","2.4 × 10⁻¹⁹ C","4.8 × 10⁻¹⁹ C"],2,"E","Charge is quantised: q = ne. 2.4 × 10⁻¹⁹ C is 1.5e, not a whole number of electrons."],
+ ["An electric dipole is placed in a uniform electric field. It experiences:",["A net force and no torque","A net force and a torque","No net force, but generally a torque","Neither force nor torque"],2,"M","The forces qE and −qE are equal and opposite, so the net force is zero. They act at different points, so there is a torque τ = p × E (zero only when p is parallel or antiparallel to E)."],
+ ["The electric field at distance r from an infinitely long straight wire with linear charge density λ is:",["λ/(2πε₀r)","λ/(4πε₀r²)","λ/(2ε₀)","λr/(2πε₀)"],0,"M","Take a cylindrical Gaussian surface of radius r and length l: E × 2πrl = λl/ε₀, so E = λ/(2πε₀r)."],
+ ["If the distance between two point charges is halved, the force between them becomes:",["Half","Double","Four times","One-fourth"],2,"E","F ∝ 1/r². Halving r makes F four times larger."]]},
+
+"Electrostatic Potential and Capacitance":{ex:[
+ ["A 12 pF capacitor is connected to a 50 V battery. How much electrostatic energy is stored?",["U = ½CV².","U = ½ × 12 × 10⁻¹² × (50)² = 6 × 10⁻¹² × 2500.","Answer: U = 1.5 × 10⁻⁸ J."]],
+ ["Three capacitors of 9 pF each are joined in series and connected to a 120 V supply. Find the total capacitance and the voltage across each.",["Series: 1/C = 1/9 + 1/9 + 1/9 = 3/9, so C = 3 pF.","Equal capacitors in series share the voltage equally: 120/3 = 40 V each.","Answer: C = 3 pF; each capacitor has 40 V across it."]],
+ ["A parallel-plate capacitor has plate area 6 × 10⁻³ m² and separation 3 mm, with air between the plates. Find its capacitance and the charge on each plate when connected to 100 V.",["C = ε₀A/d = 8.85 × 10⁻¹² × 6 × 10⁻³ / (3 × 10⁻³).","C = 17.7 × 10⁻¹² F = 17.7 pF.","Q = CV = 17.7 × 10⁻¹² × 100 = 1.77 × 10⁻⁹ C.","Answer: 17.7 pF and 1.77 × 10⁻⁹ C."]]],
+q:[
+ ["The work done in moving a charge between two points on an equipotential surface is:",["Positive","Negative","Zero","Infinite"],2,"E","W = q(V_B − V_A), and V_B = V_A on an equipotential surface, so W = 0."],
+ ["A dielectric slab of constant K fills the gap of a capacitor that stays connected to a battery. The capacitance:",["Stays the same","Becomes K times","Becomes 1/K times","Becomes K² times"],1,"E","C = Kε₀A/d, so filling the gap with a dielectric multiplies C by K."],
+ ["The potential at 9 cm from a point charge of 4 × 10⁻⁷ C is:",["4 × 10⁴ V","4 × 10³ V","3.6 × 10⁴ V","4 × 10⁵ V"],0,"M","V = kq/r = 9 × 10⁹ × 4 × 10⁻⁷ / 0.09 = 4 × 10⁴ V."],
+ ["In electrostatics, the electric field inside a conductor is:",["Maximum at the centre","Zero","Equal to the field at its surface","Uniform but not zero"],1,"E","Free charges move until the field inside is zero; any excess charge sits on the surface."],
+ ["Capacitors of 2 μF and 3 μF are joined in parallel. The equivalent capacitance is:",["1.2 μF","5 μF","6 μF","1 μF"],1,"E","In parallel, capacitances add: 2 + 3 = 5 μF."]]},
+
+"Current Electricity":{ex:[
+ ["A battery of emf 10 V and internal resistance 3 Ω is connected to a resistor. The current is 0.5 A. Find the resistor and the terminal voltage.",["I = E/(R + r), so 0.5 = 10/(R + 3).","R + 3 = 20, so R = 17 Ω.","Terminal voltage V = IR = 0.5 × 17.","Answer: R = 17 Ω, V = 8.5 V."]],
+ ["A heating element has resistance 100 Ω at 27 °C. At what temperature is its resistance 117 Ω? (α = 1.70 × 10⁻⁴ °C⁻¹)",["R_T = R₀[1 + α(T − T₀)], so T − T₀ = (R_T − R₀)/(R₀α).","T − 27 = 17 / (100 × 1.70 × 10⁻⁴) = 17 / 0.017 = 1000 °C.","Answer: T = 1027 °C."]],
+ ["Resistors of 2 Ω, 4 Ω and 5 Ω are in parallel across a 20 V battery with negligible internal resistance. Find each current and the total current.",["Each resistor has the full 20 V across it.","I₁ = 20/2 = 10 A, I₂ = 20/4 = 5 A, I₃ = 20/5 = 4 A.","Total current = 10 + 5 + 4 = 19 A, so R_eq = 20/19 Ω.","Answer: 10 A, 5 A, 4 A; total 19 A."]]],
+q:[
+ ["Current I in a conductor is related to the drift velocity v_d by:",["I = neA/v_d","I = neAv_d","I = nAv_d/e","I = neAv_d²"],1,"E","Charge crossing area A per second = n × e × (A v_d), so I = neAv_d."],
+ ["A wire is stretched to twice its length without changing its volume. Its resistance becomes:",["Twice","Half","Four times","Unchanged"],2,"M","Volume fixed: doubling l halves A. R = ρl/A, so R becomes 2 × 2 = 4 times."],
+ ["Kirchhoff's junction rule is based on the conservation of:",["Energy","Momentum","Charge","Mass"],2,"E","Charge does not pile up at a junction: the current flowing in equals the current flowing out."],
+ ["The SI unit of resistivity is:",["Ω","Ω m","Ω m⁻¹","S m⁻¹"],1,"E","ρ = RA/l has units Ω × m²/m = Ω m."],
+ ["In a balanced Wheatstone bridge P = 10 Ω, Q = 20 Ω and R = 15 Ω. The fourth resistance S is:",["7.5 Ω","30 Ω","25 Ω","45 Ω"],1,"M","Balance: P/Q = R/S, so S = RQ/P = 15 × 20/10 = 30 Ω."]]},
+
+"Moving Charges and Magnetism":{ex:[
+ ["A circular coil of 100 turns and radius 8 cm carries 0.4 A. Find the magnetic field at its centre.",["B = μ₀NI/(2R).","B = 4π × 10⁻⁷ × 100 × 0.4 / (2 × 0.08) = 4π × 10⁻⁷ × 250.","Answer: B = 3.14 × 10⁻⁴ T."]],
+ ["A long straight wire carries 35 A. Find the field 20 cm from the wire.",["B = μ₀I/(2πr) = 2 × 10⁻⁷ × I/r.","B = 2 × 10⁻⁷ × 35 / 0.2.","Answer: B = 3.5 × 10⁻⁵ T."]],
+ ["A solenoid 80 cm long has 5 layers of 400 turns each and carries 8 A. Find the field inside it near the centre.",["Total turns N = 5 × 400 = 2000; turns per metre n = 2000/0.8 = 2500 m⁻¹.","B = μ₀nI = 4π × 10⁻⁷ × 2500 × 8.","Answer: B ≈ 2.5 × 10⁻² T."]]],
+q:[
+ ["A charged particle moves parallel to a uniform magnetic field. The magnetic force on it is:",["Maximum","Zero","qvB","Along v"],1,"E","F = qvB sin θ and θ = 0°, so F = 0."],
+ ["The radius of the circular path of a charge q, mass m and speed v moving perpendicular to field B is:",["qB/mv","mv/qB","mvB/q","qv/mB"],1,"M","The magnetic force supplies the centripetal force: qvB = mv²/r, so r = mv/qB."],
+ ["A galvanometer is converted into an ammeter by connecting:",["A high resistance in series","A low resistance in parallel","A low resistance in series","A high resistance in parallel"],1,"E","A small shunt in parallel carries most of the current and keeps the ammeter's resistance low."],
+ ["Two long parallel wires carry currents in the same direction. They:",["Repel","Attract","Exert no force","Rotate"],1,"E","Parallel currents attract; antiparallel currents repel."],
+ ["The cyclotron frequency of a charged particle does not depend on its:",["Charge","Mass","Speed","The magnetic field"],2,"M","f = qB/(2πm). Speed and radius grow together, so the time per revolution stays the same."]]},
+
+"Magnetism and Matter":{ex:[
+ ["A bar magnet of moment 0.32 J T⁻¹ is placed in a uniform field of 0.15 T, at 30° to the field. Find the torque on it.",["τ = mB sin θ.","τ = 0.32 × 0.15 × sin 30° = 0.048 × 0.5.","Answer: τ = 2.4 × 10⁻² N m."]],
+ ["For the same magnet (m = 0.32 J T⁻¹, B = 0.15 T), find the potential energy in its stable and unstable positions.",["U = −mB cos θ.","Stable (θ = 0°): U = −0.32 × 0.15 = −4.8 × 10⁻² J.","Unstable (θ = 180°): U = +4.8 × 10⁻² J."]],
+ ["A solenoid of 800 turns and cross-section 2.5 × 10⁻⁴ m² carries 3 A. Find its magnetic moment.",["A current-carrying solenoid behaves like a bar magnet with m = NIA.","m = 800 × 3 × 2.5 × 10⁻⁴.","Answer: m = 0.6 J T⁻¹."]]],
+q:[
+ ["The magnetic susceptibility of a diamagnetic substance is:",["Large and positive","Small and positive","Small and negative","Zero"],2,"E","Diamagnets are weakly repelled by magnets: χ is small and negative."],
+ ["Curie's law for paramagnetic materials states that susceptibility χ is proportional to:",["T","1/T","T²","1/T²"],1,"M","χ = C/T: heat disturbs the alignment of the atomic magnets."],
+ ["Magnetic field lines:",["Start at N and end at S","Form closed loops","Can cross each other","Exist only outside a magnet"],1,"E","There are no magnetic monopoles, so field lines form continuous closed loops, running S to N inside a magnet."],
+ ["A material for a permanent magnet should have:",["Low retentivity, low coercivity","High retentivity, high coercivity","High retentivity, low coercivity","Low retentivity, high coercivity"],1,"M","High retentivity keeps strong magnetism, and high coercivity makes it hard to demagnetise (e.g. steel, alnico)."],
+ ["Above its Curie temperature, a ferromagnetic substance becomes:",["Diamagnetic","Paramagnetic","A superconductor","More strongly ferromagnetic"],1,"E","Heat breaks up the domains, so the material behaves as a paramagnet."]]},
+
+"Electromagnetic Induction":{ex:[
+ ["A 1 m metal rod rotates at 400 rad s⁻¹ about an axis through one end, perpendicular to a 0.5 T field. Find the emf between its ends.",["Each small piece dr moves at speed ωr, so ε = ∫Bωr dr = ½Bωl².","ε = ½ × 0.5 × 400 × (1)².","Answer: ε = 100 V."]],
+ ["The current in a coil falls steadily from 5 A to 0 in 0.1 s, inducing an average emf of 200 V. Find the self-inductance.",["|ε| = L × (ΔI/Δt).","200 = L × 5/0.1 = 50L.","Answer: L = 4 H."]],
+ ["A plane with a wing span of 25 m flies horizontally at 500 m s⁻¹. The vertical component of the Earth's field is 5 × 10⁻⁴ T. Find the emf across the wing tips.",["The wings cut the vertical field lines: ε = Blv.","ε = 5 × 10⁻⁴ × 25 × 500.","Answer: ε = 6.25 V."]]],
+q:[
+ ["Lenz's law is a consequence of the conservation of:",["Charge","Energy","Momentum","Mass"],1,"M","If the induced current helped the change, energy would be created from nothing. Opposing it means work must be done."],
+ ["The SI unit of inductance is the:",["Weber","Tesla","Henry","Farad"],2,"E","1 H = 1 Wb A⁻¹ = 1 V s A⁻¹."],
+ ["The self-inductance of a long solenoid of length l, area A and n turns per metre is:",["μ₀nA","μ₀n²Al","μ₀n²l/A","μ₀nl"],1,"M","Flux linkage = N × μ₀nI × A with N = nl, so L = μ₀n²Al."],
+ ["1 weber is equal to:",["1 T m⁻²","1 T m²","1 T m","1 N A⁻¹"],1,"E","Flux φ = BA, so 1 Wb = 1 T × 1 m²."],
+ ["Transformer cores are laminated to:",["Increase eddy currents","Reduce eddy current losses","Increase the flux","Reduce copper losses"],1,"E","Thin insulated sheets break up the eddy current loops, so less energy is wasted as heat."]]},
+
+"Alternating Current":{ex:[
+ ["A 100 Ω resistor is connected to a 220 V, 50 Hz supply. Find the rms and peak current.",["I_rms = V_rms/R = 220/100 = 2.2 A.","I₀ = √2 × I_rms = 1.414 × 2.2.","Answer: 2.2 A (rms), 3.11 A (peak)."]],
+ ["A 44 mH inductor is connected to a 220 V, 50 Hz supply. Find the rms current.",["X_L = 2πfL = 2 × 3.14 × 50 × 0.044 = 13.8 Ω.","I_rms = V_rms/X_L = 220/13.8.","Answer: I_rms ≈ 15.9 A."]],
+ ["A series LCR circuit has L = 5.0 H, C = 80 μF and R = 40 Ω, connected to 230 V. Find the resonant angular frequency and the current at resonance.",["ω₀ = 1/√(LC) = 1/√(5 × 80 × 10⁻⁶) = 1/√(4 × 10⁻⁴) = 1/0.02.","ω₀ = 50 rad s⁻¹.","At resonance Z = R, so I = V/R = 230/40.","Answer: ω₀ = 50 rad s⁻¹, I = 5.75 A."]]],
+q:[
+ ["The power factor of an AC circuit with a pure inductor is:",["1","0","0.5","Infinite"],1,"M","Current lags voltage by 90°, so cos φ = 0 and the average power is zero."],
+ ["At resonance in a series LCR circuit, the impedance is:",["Maximum and equal to X_L","Minimum and equal to R","Zero","Infinite"],1,"M","X_L = X_C cancel, leaving Z = R, so the current is maximum."],
+ ["A transformer works on the principle of:",["Self-induction","Mutual induction","Eddy currents","Electrostatic induction"],1,"E","A changing current in the primary induces an emf in the secondary through their shared flux."],
+ ["The rms value of an alternating current of peak value I₀ is:",["I₀/2","I₀/√2","√2 I₀","2I₀"],1,"E","I_rms = I₀/√2 ≈ 0.707 I₀ for a sinusoidal current."],
+ ["A step-up transformer:",["Increases voltage and current","Increases voltage, decreases current","Decreases voltage, increases current","Increases power"],1,"E","V_s/V_p = N_s/N_p > 1. Power is (ideally) conserved, so the current falls."]]},
+
+"Electromagnetic Waves":{ex:[
+ ["Find the wavelength of an electromagnetic wave of frequency 25 MHz in vacuum.",["λ = c/f.","λ = 3 × 10⁸ / (25 × 10⁶).","Answer: λ = 12 m (radio wave)."]],
+ ["At a point in a plane EM wave, the electric field is 6.3 V m⁻¹. Find the magnetic field there.",["In an EM wave E/B = c.","B = 6.3 / (3 × 10⁸).","Answer: B = 2.1 × 10⁻⁸ T, perpendicular to both E and the direction of travel."]],
+ ["An EM wave has wavelength 1 mm. Find its frequency and name the region.",["f = c/λ = 3 × 10⁸ / 10⁻³ = 3 × 10¹¹ Hz.","Answer: 3 × 10¹¹ Hz, in the microwave region."]]],
+q:[
+ ["Maxwell's displacement current is given by:",["ε₀ dΦ_E/dt","μ₀ dΦ_B/dt","ε₀ dΦ_B/dt","dq/dt only in a conductor"],0,"M","A changing electric field (e.g. between capacitor plates) acts like a current: I_d = ε₀ dΦ_E/dt."],
+ ["Which EM waves have the shortest wavelength?",["X-rays","Gamma rays","Ultraviolet","Microwaves"],1,"E","γ-rays have the highest frequency and so the shortest wavelength."],
+ ["Radar systems mainly use:",["Infrared","Microwaves","Ultraviolet","X-rays"],1,"E","Microwaves have short wavelengths, so they can be sent in narrow beams and reflect off aircraft."],
+ ["In an EM wave, E and B are:",["Parallel and in phase","Perpendicular and in phase","Perpendicular and 90° out of phase","Parallel and 90° out of phase"],1,"M","E, B and the direction of travel are mutually perpendicular, and E and B peak together."],
+ ["The speed of EM waves in vacuum is:",["√(μ₀ε₀)","1/√(μ₀ε₀)","μ₀ε₀","1/(μ₀ε₀)"],1,"E","c = 1/√(μ₀ε₀) ≈ 3 × 10⁸ m s⁻¹."]]},
+
+"Ray Optics and Optical Instruments":{ex:[
+ ["An object is 25 cm in front of a concave mirror of focal length 15 cm. Find the image position and magnification.",["Sign convention: u = −25 cm, f = −15 cm.","1/v = 1/f − 1/u = −1/15 + 1/25 = (−5 + 3)/75 = −2/75.","v = −37.5 cm: real image in front of the mirror.","m = −v/u = −(−37.5)/(−25) = −1.5.","Answer: real, inverted, 1.5 times larger, 37.5 cm from the mirror."]],
+ ["An object is 30 cm from a convex lens of focal length 20 cm. Find the image.",["Lens formula: 1/v − 1/u = 1/f, with u = −30 cm, f = +20 cm.","1/v = 1/20 − 1/30 = 1/60, so v = +60 cm.","m = v/u = 60/(−30) = −2.","Answer: real, inverted, twice as large, 60 cm behind the lens."]],
+ ["Find the critical angle for glass of refractive index 1.5, and the power of a lens of focal length −25 cm.",["sin C = 1/n = 1/1.5 = 0.667, so C ≈ 41.8°.","P = 1/f (in metres) = 1/(−0.25).","Answer: C ≈ 41.8°; P = −4 D (a diverging lens)."]]],
+q:[
+ ["Total internal reflection happens when light goes:",["From rarer to denser at any angle","From denser to rarer, beyond the critical angle","From denser to rarer, below the critical angle","At normal incidence"],1,"E","Both conditions are needed: travelling from denser to rarer, and an angle of incidence greater than the critical angle."],
+ ["A lens has power +2.5 D. It is a:",["Concave lens, f = 40 cm","Convex lens, f = 40 cm","Convex lens, f = 25 cm","Concave lens, f = 25 cm"],1,"E","f = 1/P = 1/2.5 = 0.4 m = 40 cm. Positive power means a converging (convex) lens."],
+ ["The magnifying power of an astronomical telescope in normal adjustment is:",["f_e/f_o","f_o/f_e","f_o × f_e","f_o + f_e"],1,"M","m = f_o/f_e, so a long-focus objective and a short-focus eyepiece give high magnification."],
+ ["The sky looks blue because scattering of light is proportional to:",["λ","1/λ²","1/λ⁴","λ⁴"],2,"M","Rayleigh scattering ∝ 1/λ⁴, so blue light is scattered far more than red."],
+ ["The mirror formula is:",["1/v − 1/u = 1/f","1/v + 1/u = 1/f","v + u = f","1/v + 1/u = 2/f only for convex mirrors"],1,"E","For all spherical mirrors, 1/v + 1/u = 1/f with the Cartesian sign convention."]]},
+
+"Wave Optics":{ex:[
+ ["In Young's experiment, the slits are 0.28 mm apart and the screen is 1.4 m away. The distance from the central bright fringe to the fourth bright fringe is 1.2 cm. Find the wavelength.",["Position of the nth bright fringe: x = nλD/d.","λ = xd/(nD) = 1.2 × 10⁻² × 0.28 × 10⁻³ / (4 × 1.4).","λ = 3.36 × 10⁻⁶ / 5.6 = 6.0 × 10⁻⁷ m.","Answer: λ = 600 nm."]],
+ ["Light of 600 nm falls on two slits 1 mm apart, with the screen 1 m away. Find the fringe width.",["β = λD/d.","β = 600 × 10⁻⁹ × 1 / 10⁻³ = 6 × 10⁻⁴ m.","Answer: β = 0.6 mm."]],
+ ["Find Brewster's angle for glass of refractive index 1.5.",["Brewster's law: tan θ_B = n.","θ_B = tan⁻¹(1.5).","Answer: θ_B ≈ 56.3°. The reflected light is fully polarised."]]],
+q:[
+ ["In Young's double-slit experiment, if the slit separation is doubled, the fringe width:",["Doubles","Halves","Stays the same","Becomes four times"],1,"E","β = λD/d, so doubling d halves β."],
+ ["According to Huygens' principle, each point on a wavefront acts as:",["A sink of energy","A source of secondary wavelets","A reflector","A polariser"],1,"E","The new wavefront is the forward envelope of these secondary wavelets."],
+ ["Polarisation of light shows that light waves are:",["Longitudinal","Transverse","Stationary","Matter waves"],1,"E","Only transverse waves can be polarised."],
+ ["Two sources are coherent if they have:",["Equal amplitude only","A constant phase difference","Different frequencies","Random phases"],1,"E","Coherent sources keep a constant phase difference (and the same frequency), so the interference pattern stays steady."],
+ ["Malus's law gives the transmitted intensity through an analyser as:",["I = I₀ cos θ","I = I₀ cos²θ","I = I₀ sin²θ","I = I₀ tan θ"],1,"M","I = I₀ cos²θ, where θ is the angle between the polariser and analyser axes."]]},
+
+"Dual Nature of Radiation and Matter":{ex:[
+ ["Find the energy of a photon of frequency 6 × 10¹⁴ Hz, in joules and electronvolts.",["E = hν = 6.63 × 10⁻³⁴ × 6 × 10¹⁴ = 3.98 × 10⁻¹⁹ J.","In eV: 3.98 × 10⁻¹⁹ / 1.6 × 10⁻¹⁹ ≈ 2.49 eV.","Answer: 3.98 × 10⁻¹⁹ J ≈ 2.49 eV."]],
+ ["Light of frequency 6 × 10¹⁴ Hz falls on caesium (work function 2.14 eV). Find the maximum kinetic energy of the photoelectrons and the stopping potential.",["Photon energy = 2.49 eV (from the previous example).","K_max = hν − φ₀ = 2.49 − 2.14 = 0.35 eV.","eV₀ = K_max, so V₀ = 0.35 V.","Answer: K_max = 0.35 eV, V₀ = 0.35 V."]],
+ ["Find the de Broglie wavelength of an electron accelerated through 100 V.",["For an electron: λ = 1.227/√V nm.","λ = 1.227/√100 = 0.1227 nm.","Answer: λ ≈ 0.123 nm, about the spacing of atoms in a crystal."]]],
+q:[
+ ["The maximum kinetic energy of photoelectrons depends on the:",["Intensity of light","Frequency of light","Time of exposure","Area of the metal"],1,"E","K_max = hν − φ₀. Intensity changes how many electrons come out, not their maximum energy."],
+ ["Above the threshold frequency, the photoelectric current is proportional to the:",["Frequency","Intensity","Wavelength","Work function"],1,"E","More photons per second release more electrons per second."],
+ ["The threshold frequency ν₀ of a metal of work function φ₀ is:",["hφ₀","φ₀/h","h/φ₀","φ₀ × c"],1,"M","At threshold, hν₀ = φ₀, so ν₀ = φ₀/h."],
+ ["The de Broglie wavelength of a particle of momentum p is:",["hp","h/p","p/h","h/p²"],1,"E","λ = h/p = h/(mv)."],
+ ["The Davisson–Germer experiment confirmed:",["The particle nature of light","The wave nature of electrons","The existence of the nucleus","Quantisation of charge"],1,"E","Electrons were diffracted by a nickel crystal, just like waves."]]},
+
+"Atoms":{ex:[
+ ["Find the energy of the electron in the n = 2 orbit of hydrogen.",["E_n = −13.6/n² eV.","E₂ = −13.6/4.","Answer: E₂ = −3.4 eV."]],
+ ["Find the wavelength of light emitted when the electron in hydrogen jumps from n = 3 to n = 2.",["ΔE = 13.6(1/2² − 1/3²) = 13.6 × 5/36 = 1.89 eV.","λ (nm) = 1240/ΔE (eV) = 1240/1.89.","Answer: λ ≈ 656 nm, the red Hα line of the Balmer series."]],
+ ["Find the radius of the second Bohr orbit of hydrogen (r₁ = 0.53 Å).",["r_n = n²r₁.","r₂ = 4 × 0.53 Å.","Answer: r₂ = 2.12 Å."]]],
+q:[
+ ["The alpha-scattering experiment showed that:",["Electrons are in fixed orbits","Most of the atom is empty space with a tiny dense nucleus","Atoms are indivisible","Charge is spread evenly"],1,"E","Most α-particles passed straight through; a few bounced back from a small, heavy, positive nucleus."],
+ ["The Balmer series of hydrogen lies in the:",["Ultraviolet region","Visible region","Infrared region","Microwave region"],1,"E","Balmer lines (transitions to n = 2) are in the visible range."],
+ ["The ionisation energy of a hydrogen atom in its ground state is:",["3.4 eV","10.2 eV","13.6 eV","1.51 eV"],2,"E","Moving the electron from n = 1 (−13.6 eV) to n = ∞ (0 eV) needs 13.6 eV."],
+ ["Bohr's quantisation condition is:",["mvr = nh","mvr = nh/2π","mv = nh/r","mvr = h/(2πn)"],1,"M","Angular momentum is a whole-number multiple of h/2π."],
+ ["The Lyman series of hydrogen lies in the:",["Visible region","Infrared region","Ultraviolet region","X-ray region"],2,"E","Lyman lines (transitions to n = 1) are high-energy ultraviolet."]]},
+
+"Nuclei":{ex:[
+ ["Find the radius of a nucleus of mass number 125 (R₀ = 1.2 fm).",["R = R₀A^(1/3).","A^(1/3) = 125^(1/3) = 5.","Answer: R = 1.2 × 5 = 6 fm."]],
+ ["Find the binding energy of the deuteron. m_p = 1.007276 u, m_n = 1.008665 u, m_d = 2.013553 u.",["Mass defect Δm = (m_p + m_n) − m_d = 2.015941 − 2.013553 = 0.002388 u.","1 u = 931.5 MeV, so BE = 0.002388 × 931.5.","Answer: BE ≈ 2.22 MeV."]],
+ ["How much energy is equivalent to 1 g of matter?",["E = mc² = 10⁻³ × (3 × 10⁸)².","Answer: E = 9 × 10¹³ J."]]],
+q:[
+ ["Nuclear density:",["Increases with A","Decreases with A","Is roughly the same for all nuclei","Is maximum for hydrogen"],2,"M","R ∝ A^(1/3), so volume ∝ A and mass ∝ A. Their ratio stays roughly constant (~2.3 × 10¹⁷ kg m⁻³)."],
+ ["The nuclear force is:",["Long range and charge dependent","Short range and charge independent","Long range and charge independent","Purely electrostatic"],1,"M","It acts only within a few femtometres and is about the same for p–p, n–n and n–p."],
+ ["The binding energy per nucleon is highest for nuclei near:",["Hydrogen","Helium","Iron (A ≈ 56)","Uranium"],2,"E","Fe-56 is among the most stable nuclei (≈ 8.8 MeV per nucleon)."],
+ ["The Sun gets its energy mainly from:",["Fission of uranium","Fusion of hydrogen into helium","Chemical burning","Radioactive decay"],1,"E","In the core, hydrogen nuclei fuse into helium and release energy."],
+ ["Isotopes have the same:",["Mass number","Number of neutrons","Atomic number","Nuclear mass"],2,"E","Isotopes have the same Z (same element) but a different number of neutrons."]]},
+
+"Semiconductor Electronics":{ex:[
+ ["Pure Si has n_i = 1.5 × 10¹⁶ m⁻³. It is doped with arsenic at 4.5 × 10²² m⁻³. Find the electron and hole concentrations.",["Each As atom gives one free electron, so n_e ≈ 4.5 × 10²² m⁻³.","Mass action law: n_e n_h = n_i².","n_h = (1.5 × 10¹⁶)² / 4.5 × 10²² = 2.25 × 10³² / 4.5 × 10²² = 5 × 10⁹ m⁻³.","Answer: n_e ≈ 4.5 × 10²² m⁻³, n_h = 5 × 10⁹ m⁻³ (n-type)."]],
+ ["A 50 Hz AC supply is fed to a half-wave and to a full-wave rectifier. What is the output ripple frequency in each?",["Half-wave: one output pulse per cycle, so 50 Hz.","Full-wave: both halves of the cycle give a pulse, so 2 × 50 = 100 Hz.","Answer: 50 Hz and 100 Hz."]],
+ ["A semiconductor has a band gap of 1.1 eV. What is the longest wavelength of light that can create electron–hole pairs in it?",["The photon must have at least 1.1 eV: λ_max (nm) = 1240/E_g (eV).","λ_max = 1240/1.1.","Answer: λ_max ≈ 1127 nm (near infrared)."]]],
+q:[
+ ["In an n-type semiconductor, the majority carriers and dopant are:",["Holes; trivalent","Electrons; pentavalent","Electrons; trivalent","Holes; pentavalent"],1,"E","Pentavalent atoms (P, As) donate extra electrons."],
+ ["When a p–n junction is reverse biased, the depletion layer:",["Narrows","Widens","Disappears","Stays the same"],1,"E","The applied field pulls carriers away from the junction, so the barrier region widens."],
+ ["At thermal equilibrium in a semiconductor:",["n_e + n_h = n_i","n_e n_h = n_i²","n_e = n_h always","n_e/n_h = n_i"],1,"M","The mass action law holds for intrinsic and extrinsic semiconductors."],
+ ["The output frequency of a full-wave rectifier fed with 50 Hz AC is:",["25 Hz","50 Hz","100 Hz","200 Hz"],2,"E","Both half-cycles are used, so the output repeats twice per input cycle."],
+ ["The band gap of an insulator is typically:",["Zero","Less than 3 eV","Greater than 3 eV","Negative"],2,"E","Insulators have E_g > 3 eV; semiconductors < 3 eV; in conductors the bands overlap."]]}
+});
+
+NC("12","Chemistry",{
+"Solutions":{ex:[
+ ["2.5 g of ethanoic acid (CH₃COOH) is dissolved in 75 g of benzene. Find the molality.",["Molar mass of CH₃COOH = 60 g mol⁻¹, so moles = 2.5/60 = 0.0417 mol.","Mass of solvent = 75 g = 0.075 kg.","m = 0.0417/0.075.","Answer: m = 0.556 mol kg⁻¹."]],
+ ["Find the mole fraction of ethylene glycol (C₂H₆O₂) in a solution containing 20% glycol by mass.",["In 100 g of solution: 20 g glycol and 80 g water.","Glycol: 20/62 = 0.323 mol. Water: 80/18 = 4.444 mol.","x(glycol) = 0.323/(0.323 + 4.444) = 0.068.","Answer: x(glycol) = 0.068, x(water) = 0.932."]],
+ ["18 g of glucose (M = 180) is dissolved in 1 kg of water. Find the boiling point of the solution (K_b of water = 0.52 K kg mol⁻¹).",["Moles of glucose = 18/180 = 0.1 mol, so m = 0.1 mol kg⁻¹.","ΔT_b = K_b × m = 0.52 × 0.1 = 0.052 K.","Answer: T_b = 373.15 + 0.052 = 373.20 K."]]],
+q:[
+ ["Colligative properties depend on the:",["Nature of the solute","Number of solute particles","Colour of the solute","Molar mass of the solvent only"],1,"E","They depend only on how many solute particles there are, not on what they are."],
+ ["The van't Hoff factor of NaCl in very dilute aqueous solution is about:",["1","2","3","0.5"],1,"E","NaCl → Na⁺ + Cl⁻: two particles per formula unit, so i ≈ 2."],
+ ["Which mixture shows negative deviation from Raoult's law?",["Ethanol + acetone","Chloroform + acetone","Benzene + toluene","n-Hexane + n-heptane"],1,"M","Chloroform hydrogen-bonds with acetone, so the attraction is stronger than in the pure liquids and the vapour pressure falls."],
+ ["Henry's law can be written as:",["p = K_H x","p = x/K_H","p = K_H/x","x = K_H p²"],0,"E","The partial pressure of a gas over a solution is proportional to its mole fraction in the solution."],
+ ["Molality is preferred over molarity because it:",["Is easier to measure","Does not change with temperature","Uses volume of solution","Is always larger"],1,"M","Molality uses mass of solvent, which doesn't change with temperature; volume does."]]},
+
+"Electrochemistry":{ex:[
+ ["Find E°cell and ΔG° for the Daniell cell Zn | Zn²⁺ || Cu²⁺ | Cu. (E° Zn²⁺/Zn = −0.76 V, Cu²⁺/Cu = +0.34 V)",["E°cell = E°cathode − E°anode = 0.34 − (−0.76) = 1.10 V.","ΔG° = −nFE°cell with n = 2.","ΔG° = −2 × 96500 × 1.10 = −212 300 J mol⁻¹.","Answer: E°cell = 1.10 V, ΔG° = −212.3 kJ mol⁻¹ (spontaneous)."]],
+ ["Find the emf of Mg | Mg²⁺(0.001 M) || Cu²⁺(0.0001 M) | Cu, given E°cell = 2.71 V.",["Cell reaction: Mg + Cu²⁺ → Mg²⁺ + Cu, n = 2.","Nernst equation: E = E° − (0.059/2) log([Mg²⁺]/[Cu²⁺]).","E = 2.71 − 0.0295 × log(0.001/0.0001) = 2.71 − 0.0295 × 1.","Answer: E = 2.68 V."]],
+ ["A current of 1.5 A is passed through CuSO₄ solution for 10 minutes. What mass of copper is deposited?",["Charge Q = It = 1.5 × 600 = 900 C.","Cu²⁺ + 2e⁻ → Cu: 2 × 96500 C deposit 63.5 g.","Mass = 63.5 × 900 / (2 × 96500).","Answer: ≈ 0.296 g of copper."]]],
+q:[
+ ["The salt bridge in a galvanic cell:",["Supplies electrons","Completes the circuit and keeps the solutions neutral","Increases the emf","Acts as the anode"],1,"E","Its ions move into each half-cell to balance the charge as the reaction runs."],
+ ["On dilution, the molar conductivity of an electrolyte:",["Decreases","Increases","Stays constant","Becomes zero"],1,"E","Ions are further apart and move more freely (and weak electrolytes ionise more), so Λm rises."],
+ ["One faraday is the charge of:",["One electron","One mole of electrons","One coulomb","One ampere for an hour"],1,"E","1 F = N_A × e ≈ 96 500 C mol⁻¹."],
+ ["In an electrochemical cell, reduction takes place at the:",["Anode","Cathode","Salt bridge","Both electrodes"],1,"E","Cathode = reduction; anode = oxidation."],
+ ["Kohlrausch's law states that the limiting molar conductivity of an electrolyte equals:",["The product of its ions' values","The sum of the limiting conductivities of its ions","The conductivity of the cation only","Zero for strong electrolytes"],1,"M","At infinite dilution each ion contributes independently: Λ°m = ν₊λ°₊ + ν₋λ°₋."]]},
+
+"Chemical Kinetics":{ex:[
+ ["A first-order reaction has k = 1.15 × 10⁻³ s⁻¹. How long will 5 g of reactant take to fall to 3 g?",["For first order: t = (2.303/k) log([R]₀/[R]).","t = (2.303/1.15 × 10⁻³) × log(5/3) = 2003 × 0.2218.","Answer: t ≈ 444 s."]],
+ ["A first-order reaction has k = 200 s⁻¹. Find its half-life.",["t½ = 0.693/k.","t½ = 0.693/200.","Answer: t½ = 3.47 × 10⁻³ s."]],
+ ["The rate law of a reaction is rate = k[A][B]². Find the overall order and the effect of doubling [B].",["Order = 1 + 2 = 3.","Rate ∝ [B]², so doubling [B] multiplies the rate by 2² = 4.","Answer: third order; the rate becomes four times."]]],
+q:[
+ ["The unit of the rate constant of a first-order reaction is:",["mol L⁻¹ s⁻¹","s⁻¹","L mol⁻¹ s⁻¹","mol⁻¹ L s"],1,"E","For order n, the unit is (mol L⁻¹)^(1−n) s⁻¹; with n = 1 that is s⁻¹."],
+ ["The half-life of a first-order reaction:",["Depends on initial concentration","Is independent of initial concentration","Doubles each time","Is zero"],1,"E","t½ = 0.693/k contains no concentration term."],
+ ["A catalyst increases the rate of a reaction by:",["Increasing ΔH","Lowering the activation energy","Shifting the equilibrium","Increasing the temperature"],1,"E","It provides a path with lower Eₐ. It does not change ΔG or the equilibrium position."],
+ ["The Arrhenius equation is:",["k = A e^(Eₐ/RT)","k = A e^(−Eₐ/RT)","k = Eₐ e^(−A/RT)","k = A RT/Eₐ"],1,"M","k = A e^(−Eₐ/RT): a higher temperature or a lower Eₐ gives a larger k."],
+ ["For a zero-order reaction, the rate:",["Is proportional to [R]","Is independent of concentration","Is proportional to [R]²","Is always zero"],1,"M","Rate = k[R]⁰ = k, constant until the reactant runs out."]]},
+
+"d and f Block Elements":{ex:[
+ ["Why is zinc not regarded as a transition element?",["A transition element has an incompletely filled d-subshell in the atom or in a common ion.","Zn is [Ar]3d¹⁰4s² and Zn²⁺ is [Ar]3d¹⁰: the d-subshell is full in both.","Answer: so Zn is a d-block element but not a transition element."]],
+ ["Find the spin-only magnetic moment of Fe²⁺ (Z = 26).",["Fe²⁺ = [Ar]3d⁶, which has 4 unpaired electrons.","μ = √[n(n + 2)] BM = √(4 × 6) = √24.","Answer: μ ≈ 4.90 BM."]],
+ ["Write the ionic equation for acidified KMnO₄ oxidising Fe²⁺.",["MnO₄⁻ gains 5 electrons (Mn +7 → +2); each Fe²⁺ loses 1.","So 5 Fe²⁺ are needed per MnO₄⁻.","Answer: MnO₄⁻ + 8H⁺ + 5Fe²⁺ → Mn²⁺ + 5Fe³⁺ + 4H₂O."]]],
+q:[
+ ["Because of lanthanoid contraction, these pairs have almost the same atomic radii:",["Ti and Zr","Zr and Hf","Cr and Mo","Sc and Y"],1,"M","The poor shielding of 4f electrons cancels the expected size increase from Zr to Hf."],
+ ["The highest oxidation state shown by manganese is:",["+4","+6","+7","+8"],2,"E","Mn (3d⁵4s²) can use all seven electrons, e.g. in KMnO₄."],
+ ["The colour of most transition metal ions is due to:",["s–s transitions","d–d transitions","Nuclear changes","Their high density"],1,"E","Partly filled d-orbitals absorb visible light as electrons jump between split d levels."],
+ ["Which ion is colourless?",["Ti³⁺","V³⁺","Sc³⁺","Cr³⁺"],2,"M","Sc³⁺ is 3d⁰, so no d–d transition is possible."],
+ ["The most common oxidation state of the lanthanoids is:",["+2","+3","+4","+5"],1,"E","All lanthanoids show +3; a few also show +2 or +4."]]},
+
+"Coordination Compounds":{ex:[
+ ["Give the IUPAC name of [Co(NH₃)₄Cl₂]Cl and the oxidation state of cobalt.",["NH₃ is neutral; each Cl⁻ is −1; the outer Cl⁻ balances +1 on the complex ion.","x + 0 + 2(−1) = +1, so x = +3.","Ligands go in alphabetical order: ammine before chlorido.","Answer: tetraamminedichloridocobalt(III) chloride; Co is +3."]],
+ ["Explain the hybridisation and magnetic behaviour of [Fe(CN)₆]³⁻.",["Fe³⁺ is 3d⁵. CN⁻ is a strong-field ligand, so the electrons pair up: t₂g⁵.","Two empty 3d orbitals plus 4s and 4p give d²sp³ hybridisation: octahedral, inner orbital.","One unpaired electron, so μ = √3 ≈ 1.73 BM: paramagnetic."]],
+ ["How many moles of AgCl are precipitated when excess AgNO₃ is added to one mole of [Co(NH₃)₆]Cl₃?",["All three Cl⁻ are outside the coordination sphere, so all are free ions.","[Co(NH₃)₆]Cl₃ → [Co(NH₃)₆]³⁺ + 3Cl⁻ (4 ions in solution).","Answer: 3 mol AgCl."]]],
+q:[
+ ["EDTA⁴⁻ is a:",["Monodentate ligand","Bidentate ligand","Tetradentate ligand","Hexadentate ligand"],3,"E","It binds through two N atoms and four O atoms."],
+ ["The geometry of [Ni(CO)₄] is:",["Square planar","Tetrahedral","Octahedral","Linear"],1,"M","Ni(0) is sp³ hybridised, with CO pairing up its electrons, so it is tetrahedral and diamagnetic."],
+ ["Which is an ambidentate ligand?",["NH₃","H₂O","NO₂⁻","en"],2,"E","NO₂⁻ can bind through N (nitrito-N) or O (nitrito-O)."],
+ ["The number of geometrical isomers of square planar [Pt(NH₃)₂Cl₂] is:",["1","2","3","4"],1,"E","Cis and trans forms."],
+ ["The coordination number of iron in [Fe(C₂O₄)₃]³⁻ is:",["3","4","6","9"],2,"M","Oxalate is bidentate, so 3 × 2 = 6 donor atoms."]]},
+
+"Haloalkanes and Haloarenes":{ex:[
+ ["Arrange in order of SN1 reactivity: CH₃CH₂Br, (CH₃)₃CBr, (CH₃)₂CHBr.",["SN1 goes through a carbocation, so a more stable carbocation means a faster reaction.","Stability: 3° > 2° > 1°.","Answer: (CH₃)₃CBr > (CH₃)₂CHBr > CH₃CH₂Br."]],
+ ["What happens when bromoethane reacts with KCN, and with AgCN?",["KCN is ionic, so CN⁻ attacks through carbon: CH₃CH₂Br + KCN → CH₃CH₂CN (propanenitrile).","AgCN is mainly covalent, so it attacks through nitrogen: CH₃CH₂Br + AgCN → CH₃CH₂NC (ethyl isocyanide)."]],
+ ["Why are aryl halides much less reactive than alkyl halides toward nucleophilic substitution?",["Resonance gives the C–X bond partial double-bond character, so it is harder to break.","The carbon is sp² hybridised and holds the halogen more tightly.","The electron-rich ring repels the incoming nucleophile.","A phenyl cation is very unstable, so SN1 is not possible either."]]],
+q:[
+ ["An SN2 reaction at a chiral carbon gives:",["Retention of configuration","Inversion of configuration","A racemic mixture","No product"],1,"E","The nucleophile attacks from the back, flipping the molecule like an umbrella (Walden inversion)."],
+ ["Racemisation is typical of:",["SN1 reactions","SN2 reactions","Free radical addition","Elimination only"],0,"E","The flat carbocation can be attacked from either face."],
+ ["The Wurtz reaction converts an alkyl halide into:",["An alkene","An alkane with double the carbons","An alcohol","An ether"],1,"E","2RX + 2Na → R–R + 2NaX, in dry ether."],
+ ["Chloroform is stored in closed dark bottles because in light and air it forms:",["Ethanol","Phosgene (COCl₂)","Methane","Carbon tetrachloride"],1,"M","2CHCl₃ + O₂ → 2COCl₂ + 2HCl. Phosgene is very poisonous."],
+ ["Treating chlorobenzene with Cl₂ and anhydrous FeCl₃ gives mainly:",["meta-Dichlorobenzene","ortho- and para-Dichlorobenzene","Benzene","Hexachlorobenzene"],1,"M","Cl is deactivating but ortho/para-directing; the para product dominates."]]},
+
+"Alcohols, Phenols and Ethers":{ex:[
+ ["Why is phenol more acidic than ethanol?",["Phenoxide ion is stabilised by resonance: the negative charge spreads over the ring.","Ethoxide has no such resonance, and the ethyl group pushes extra electron density onto O⁻.","Answer: phenol loses H⁺ more easily (pKa ≈ 10 vs ≈ 16)."]],
+ ["How does the Lucas test distinguish 1°, 2° and 3° alcohols?",["Lucas reagent is conc. HCl + anhydrous ZnCl₂.","3°: turbidity appears at once.","2°: turbidity in about 5 minutes.","1°: no turbidity at room temperature."]],
+ ["Write the Reimer–Tiemann reaction of phenol.",["Phenol + CHCl₃ + aqueous NaOH, then acid.","The electrophile (dichlorocarbene) attacks the ortho position, and hydrolysis gives –CHO.","Answer: the product is salicylaldehyde (2-hydroxybenzaldehyde)."]]],
+q:[
+ ["Williamson synthesis prepares ethers from:",["Two alcohols","An alkyl halide and an alkoxide","An aldehyde and an alcohol","An alkene and water"],1,"E","R–X + R′O⁻Na⁺ → R–O–R′ + NaX (SN2; a 1° halide works best)."],
+ ["The correct order of acidic strength is:",["Ethanol > phenol > p-nitrophenol","p-Nitrophenol > phenol > ethanol","Phenol > ethanol > p-nitrophenol","Ethanol > p-nitrophenol > phenol"],1,"M","–NO₂ further stabilises phenoxide; ethanol is the weakest acid."],
+ ["Kolbe's reaction of sodium phenoxide with CO₂ gives:",["Benzoic acid","Salicylic acid","Picric acid","Phthalic acid"],1,"E","After acidification you get o-hydroxybenzoic acid (salicylic acid)."],
+ ["Alcohols boil at a higher temperature than ethers of similar mass because of:",["Higher molar mass","Hydrogen bonding","Ionic bonds","Lower polarity"],1,"E","The O–H group lets alcohol molecules hydrogen-bond to each other."],
+ ["Heating ethanol with conc. H₂SO₄ at 443 K gives:",["Diethyl ether","Ethene","Ethanal","Ethanoic acid"],1,"M","At 443 K intramolecular dehydration gives ethene; at 413 K the ether forms."]]},
+
+"Aldehydes, Ketones and Carboxylic Acids":{ex:[
+ ["What happens when methanal is heated with concentrated NaOH?",["Methanal has no α-hydrogen, so it undergoes the Cannizzaro reaction.","One molecule is reduced and the other oxidised.","Answer: 2HCHO + NaOH → CH₃OH + HCOONa."]],
+ ["How can you tell ethanal from propanone?",["Tollens' test: ethanal gives a silver mirror; propanone does not.","Fehling's test: ethanal gives a red-brown Cu₂O precipitate; propanone does not.","Aldehydes are easily oxidised; ketones are not."]],
+ ["Why is chloroethanoic acid stronger than ethanoic acid?",["Cl pulls electron density away (−I effect).","This spreads out and stabilises the negative charge on the carboxylate ion.","Answer: so ClCH₂COOH ionises more easily (lower pKa)."]]],
+q:[
+ ["Aldol condensation needs the carbonyl compound to have:",["No α-hydrogen","At least one α-hydrogen","A benzene ring","A carboxyl group"],1,"E","Base removes an α-H to form the enolate that attacks a second molecule."],
+ ["Clemmensen reduction converts C=O to CH₂ using:",["NH₂NH₂/KOH","Zn–Hg and conc. HCl","LiAlH₄","H₂/Pd–BaSO₄"],1,"E","Zinc amalgam with HCl; Wolff–Kishner uses hydrazine and KOH."],
+ ["Fehling's test is given by:",["Aliphatic aldehydes","All ketones","Aromatic aldehydes like benzaldehyde","Carboxylic acids"],0,"M","Aliphatic aldehydes reduce Cu²⁺ to red Cu₂O; benzaldehyde does not."],
+ ["Which acid is the strongest?",["CH₃COOH","ClCH₂COOH","Cl₂CHCOOH","CF₃COOH"],3,"M","Three fluorine atoms have the strongest −I effect, so the anion is most stable."],
+ ["Rosenmund reduction converts an acyl chloride into:",["An alcohol","An aldehyde","A ketone","An alkane"],1,"E","H₂ over Pd poisoned with BaSO₄ stops at the aldehyde."]]},
+
+"Amines":{ex:[
+ ["Arrange the methylamines in order of basic strength in water: NH₃, CH₃NH₂, (CH₃)₂NH, (CH₃)₃N.",["Methyl groups push electrons (+I), making N more basic.","In water, solvation of the protonated amine also matters, and crowding hurts the 3° amine.","Answer: (CH₃)₂NH > CH₃NH₂ > (CH₃)₃N > NH₃."]],
+ ["What happens when aniline is treated with bromine water?",["–NH₂ strongly activates the ring at the ortho and para positions.","All three positions are substituted at once.","Answer: a white precipitate of 2,4,6-tribromoaniline."]],
+ ["How does the Hinsberg test tell 1°, 2° and 3° amines apart?",["Reagent: benzenesulphonyl chloride.","1°: gives a sulphonamide that dissolves in alkali.","2°: gives a sulphonamide that does not dissolve in alkali.","3°: no reaction."]]],
+q:[
+ ["Aniline is a weaker base than methylamine because:",["It has a higher molar mass","The N lone pair is delocalised into the ring","It has more hydrogen bonding","It is aromatic and acidic"],1,"M","Resonance makes the lone pair less available to accept a proton."],
+ ["The carbylamine test (CHCl₃ + alcoholic KOH) is given by:",["Primary amines only","Secondary amines only","Tertiary amines only","All amines"],0,"E","Only 1° amines (aliphatic or aromatic) give a foul-smelling isocyanide."],
+ ["Gabriel phthalimide synthesis is used to make:",["Primary aliphatic amines","Secondary amines","Tertiary amines","Aniline"],0,"E","Aryl halides don't react with phthalimide anion, so aniline can't be made this way."],
+ ["Hoffmann bromamide degradation gives an amine with:",["The same number of carbons","One carbon fewer than the amide","One carbon more","Two carbons fewer"],1,"E","RCONH₂ + Br₂ + 4NaOH → RNH₂ + Na₂CO₃ + 2NaBr + 2H₂O."],
+ ["Aniline + NaNO₂ + HCl at 273–278 K gives:",["Phenol","Benzenediazonium chloride","Nitrobenzene","Chlorobenzene"],1,"E","Diazotisation. The salt is unstable above about 278 K."]]},
+
+"Biomolecules":{ex:[
+ ["What reactions show that glucose has an aldehyde group?",["It forms a cyanohydrin with HCN and an oxime with hydroxylamine (a carbonyl group).","Bromine water oxidises it to gluconic acid with the same number of carbons, so the carbonyl is an aldehyde.","Answer: glucose is an aldohexose."]],
+ ["Why is hydrolysed sucrose called invert sugar?",["Sucrose is dextrorotatory (+66.5°).","Hydrolysis gives equal amounts of D-(+)-glucose (+52.5°) and D-(−)-fructose (−92.4°).","The mixture is laevorotatory, so the sign of rotation is inverted."]],
+ ["What happens to a protein when an egg is boiled?",["The protein is denatured.","Heat breaks hydrogen bonds, destroying the secondary and tertiary structure.","The primary structure (sequence of amino acids) stays the same.","Its biological activity is lost."]]],
+q:[
+ ["In sucrose, the glycosidic link joins:",["C1 of α-glucose and C4 of β-fructose","C1 of α-glucose and C2 of β-fructose","C1 of β-glucose and C4 of glucose","C4 of glucose and C6 of fructose"],1,"M","Both reducing groups are tied up, so sucrose is a non-reducing sugar."],
+ ["Deficiency of vitamin C causes:",["Rickets","Scurvy","Beriberi","Night blindness"],1,"E","Scurvy: bleeding gums. Rickets = vitamin D; beriberi = B₁; night blindness = A."],
+ ["Which base is found in DNA but not in RNA?",["Adenine","Guanine","Thymine","Cytosine"],2,"E","RNA has uracil in place of thymine."],
+ ["The peptide bond is:",["–CO–O–","–CO–NH–","–NH–NH–","–C–O–C–"],1,"E","It forms between –COOH of one amino acid and –NH₂ of the next, with loss of water."],
+ ["The water-soluble vitamins are:",["A and D","E and K","B group and C","A and K"],2,"E","They are not stored in the body, so they must be eaten regularly."]]}
+});
+
+NC("12","Maths",{
+"Relations and Functions":{ex:[
+ ["Show that R = {(a, b) : a − b is divisible by 2} on the integers Z is an equivalence relation.",["Reflexive: a − a = 0 is divisible by 2, so (a, a) ∈ R.","Symmetric: if a − b = 2k, then b − a = 2(−k), so (b, a) ∈ R.","Transitive: if a − b = 2k and b − c = 2m, then a − c = 2(k + m), so (a, c) ∈ R.","Answer: R is reflexive, symmetric and transitive, so it is an equivalence relation."]],
+ ["Show that f : R → R, f(x) = 2x + 3 is a bijection and find its inverse.",["One-one: f(x₁) = f(x₂) ⇒ 2x₁ + 3 = 2x₂ + 3 ⇒ x₁ = x₂.","Onto: for any real y, x = (y − 3)/2 is real and f(x) = y.","Answer: f is bijective and f⁻¹(y) = (y − 3)/2."]],
+ ["If f(x) = x² and g(x) = 2x + 1, find gof and fog.",["gof(x) = g(f(x)) = 2x² + 1.","fog(x) = f(g(x)) = (2x + 1)² = 4x² + 4x + 1.","Answer: gof ≠ fog, so composition is not commutative."]]],
+q:[
+ ["The number of functions from a set with 3 elements to a set with 2 elements is:",["6","8","9","5"],1,"M","Each of the 3 elements has 2 choices: 2³ = 8."],
+ ["R = {(1,1), (2,2), (3,3), (1,2)} on {1, 2, 3} is:",["Reflexive and symmetric","Reflexive and transitive but not symmetric","An equivalence relation","Symmetric only"],1,"M","All (a, a) are present; (1,2) is present but (2,1) is not; no pair breaks transitivity."],
+ ["f : R → R, f(x) = x² is:",["One-one and onto","One-one but not onto","Onto but not one-one","Neither one-one nor onto"],3,"E","f(−1) = f(1), so not one-one; negative numbers are never reached, so not onto."],
+ ["If f(x) = x + 1 and g(x) = 2x, then f(g(x)) is:",["2x + 2","2x + 1","x + 2","2x"],1,"E","f(g(x)) = f(2x) = 2x + 1."],
+ ["The identity relation on a non-empty set is:",["Not reflexive","Symmetric but not transitive","An equivalence relation","Empty"],2,"E","It contains only (a, a), which is reflexive, symmetric and transitive."]]},
+
+"Inverse Trigonometric Functions":{ex:[
+ ["Find the principal values of sin⁻¹(1/2) and cos⁻¹(−1/2).",["sin⁻¹ has range [−π/2, π/2]; sin(π/6) = 1/2, so sin⁻¹(1/2) = π/6.","cos⁻¹ has range [0, π]; cos(2π/3) = −1/2, so cos⁻¹(−1/2) = 2π/3."]],
+ ["Evaluate tan⁻¹(1) + cos⁻¹(−1/2) + sin⁻¹(−1/2).",["tan⁻¹(1) = π/4, cos⁻¹(−1/2) = 2π/3, sin⁻¹(−1/2) = −π/6.","Sum = π/4 + 2π/3 − π/6 = (3π + 8π − 2π)/12 = 9π/12.","Answer: 3π/4."]],
+ ["Find sin⁻¹(sin 3π/5).",["3π/5 is not in [−π/2, π/2], so the answer is not 3π/5.","sin(3π/5) = sin(π − 3π/5) = sin(2π/5), and 2π/5 is in the principal range.","Answer: 2π/5."]]],
+q:[
+ ["The range of the principal value branch of cos⁻¹x is:",["[−π/2, π/2]","[0, π]","(0, π)","[−π, π]"],1,"E","cos⁻¹ : [−1, 1] → [0, π]."],
+ ["tan⁻¹(√3) equals:",["π/6","π/4","π/3","2π/3"],2,"E","tan(π/3) = √3."],
+ ["sin⁻¹x + cos⁻¹x equals (for |x| ≤ 1):",["0","π","π/2","π/4"],2,"E","A standard identity."],
+ ["cos⁻¹(cos 7π/6) equals:",["7π/6","5π/6","π/6","−π/6"],1,"M","7π/6 is outside [0, π]; cos(7π/6) = cos(2π − 7π/6) = cos(5π/6)."],
+ ["The domain of sin⁻¹x is:",["R","[−1, 1]","[0, π]","(−1, 1)"],1,"E","Sine values lie only between −1 and 1."]]},
+
+"Matrices":{ex:[
+ ["If A = [[1, 2], [3, 4]] and B = [[2, 0], [1, 3]], find AB.",["Row 1 × columns: (1·2 + 2·1, 1·0 + 2·3) = (4, 6).","Row 2 × columns: (3·2 + 4·1, 3·0 + 4·3) = (10, 12).","Answer: AB = [[4, 6], [10, 12]]."]],
+ ["Write A = [[3, 5], [1, −1]] as the sum of a symmetric and a skew-symmetric matrix.",["P = ½(A + A′) = ½[[6, 6], [6, −2]] = [[3, 3], [3, −1]] (symmetric).","Q = ½(A − A′) = ½[[0, 4], [−4, 0]] = [[0, 2], [−2, 0]] (skew-symmetric).","Check: P + Q = [[3, 5], [1, −1]] = A."]],
+ ["A matrix has 24 elements. What orders can it have?",["The order m × n must satisfy mn = 24.","Answer: 1×24, 24×1, 2×12, 12×2, 3×8, 8×3, 4×6, 6×4 (8 orders)."]]],
+q:[
+ ["(AB)′ equals:",["A′B′","B′A′","AB","BA"],1,"E","The transpose of a product reverses the order."],
+ ["If A is 3 × 4 and B is 4 × 2, AB is of order:",["4 × 4","3 × 2","2 × 3","Not defined"],1,"E","(m × n)(n × p) gives m × p."],
+ ["The diagonal elements of a skew-symmetric matrix are:",["1","Zero","Equal but non-zero","Any numbers"],1,"E","aᵢᵢ = −aᵢᵢ means aᵢᵢ = 0."],
+ ["If A = [[1, 1], [0, 1]], then A² is:",["[[1, 2], [0, 1]]","[[1, 1], [0, 1]]","[[2, 2], [0, 2]]","[[1, 0], [0, 1]]"],0,"M","[[1·1 + 1·0, 1·1 + 1·1], [0, 1]] = [[1, 2], [0, 1]]."],
+ ["A matrix that is both symmetric and skew-symmetric is:",["The identity matrix","A diagonal matrix","The zero matrix","Any square matrix"],2,"M","A′ = A and A′ = −A together give A = −A, so A = O."]]},
+
+"Determinants":{ex:[
+ ["Evaluate |2 4; −5 −1|.",["|a b; c d| = ad − bc.","= 2(−1) − 4(−5) = −2 + 20.","Answer: 18."]],
+ ["Find the area of the triangle with vertices (1, 0), (6, 0) and (4, 3).",["Area = ½ |x₁(y₂ − y₃) + x₂(y₃ − y₁) + x₃(y₁ − y₂)|.","= ½ |1(0 − 3) + 6(3 − 0) + 4(0 − 0)| = ½ |−3 + 18|.","Answer: 15/2 = 7.5 square units."]],
+ ["Solve 2x + 5y = 1 and 3x + 2y = 7 using matrices.",["A = [[2, 5], [3, 2]], |A| = 4 − 15 = −11 ≠ 0, so a unique solution exists.","A⁻¹ = (1/−11)[[2, −5], [−3, 2]].","X = A⁻¹B = (1/−11)[[2·1 − 5·7], [−3·1 + 2·7]] = (1/−11)[[−33], [11]].","Answer: x = 3, y = −1."]]],
+q:[
+ ["If A is 3 × 3, then |kA| equals:",["k|A|","k²|A|","k³|A|","3k|A|"],2,"M","Each of the 3 rows is multiplied by k."],
+ ["If A is invertible, |A⁻¹| equals:",["|A|","1/|A|","−|A|","|A|²"],1,"E","AA⁻¹ = I gives |A||A⁻¹| = 1."],
+ ["A determinant with two identical rows equals:",["1","Zero","The product of the diagonal","Undefined"],1,"E","Swapping the rows changes the sign but not the value, so Δ = −Δ and Δ = 0."],
+ ["If A is 3 × 3 and |A| = 5, then |adj A| is:",["5","25","125","1/5"],1,"M","|adj A| = |A|^(n−1) = 5² = 25."],
+ ["For what x is [[x, 2], [2, 1]] singular?",["1","2","4","0"],2,"E","x·1 − 2·2 = 0 gives x = 4."]]},
+
+"Continuity and Differentiability":{ex:[
+ ["Show that f(x) = |x| is continuous but not differentiable at x = 0.",["The left and right limits at 0 are both 0 = f(0), so f is continuous.","Left derivative: lim (|h| − 0)/h as h → 0⁻ = −1.","Right derivative: lim (|h| − 0)/h as h → 0⁺ = +1.","They differ, so f is not differentiable at 0 (there is a sharp corner)."]],
+ ["Find dy/dx if y = x^x.",["Take logs: log y = x log x.","Differentiate: (1/y) dy/dx = log x + 1.","Answer: dy/dx = x^x(1 + log x)."]],
+ ["If x = a cos θ and y = a sin θ, find dy/dx.",["dx/dθ = −a sin θ, dy/dθ = a cos θ.","dy/dx = (dy/dθ)/(dx/dθ) = a cos θ / (−a sin θ).","Answer: dy/dx = −cot θ."]]],
+q:[
+ ["d/dx (e^(3x)) equals:",["e^(3x)","3e^(3x)","e^(3x)/3","3x e^(3x)"],1,"E","Chain rule: e^(3x) × 3."],
+ ["d/dx (tan⁻¹x) equals:",["1/√(1 − x²)","1/(1 + x²)","−1/(1 + x²)","sec²x"],1,"E","A standard derivative."],
+ ["f(x) = kx² for x ≤ 2 and f(x) = 3 for x > 2 is continuous at x = 2 if k equals:",["3/2","3/4","4/3","2"],1,"M","Need 4k = 3, so k = 3/4."],
+ ["d/dx (sin x²) equals:",["cos x²","2x cos x²","2 sin x cos x","−2x cos x²"],1,"E","Chain rule: cos(x²) × 2x."],
+ ["Which statement is true?",["Every continuous function is differentiable","Every differentiable function is continuous","|x| is differentiable at 0","A polynomial can be discontinuous"],1,"E","Differentiability implies continuity, but not the other way round (e.g. |x|)."]]},
+
+"Application of Derivatives":{ex:[
+ ["The radius of a circle grows at 0.7 cm s⁻¹. How fast is the circumference growing?",["C = 2πr, so dC/dt = 2π dr/dt.","dC/dt = 2π × 0.7.","Answer: 1.4π cm s⁻¹ (≈ 4.4 cm s⁻¹)."]],
+ ["Find where f(x) = x² − 4x + 6 is increasing and where it is decreasing.",["f′(x) = 2x − 4, which is zero at x = 2.","f′(x) < 0 for x < 2 and f′(x) > 0 for x > 2.","Answer: decreasing on (−∞, 2), increasing on (2, ∞)."]],
+ ["Find the equation of the tangent to y = x³ at (1, 1).",["dy/dx = 3x², so the slope at x = 1 is 3.","y − 1 = 3(x − 1).","Answer: y = 3x − 2."]],
+ ["Find two positive numbers with sum 15 whose product is the largest.",["Let the numbers be x and 15 − x: P = x(15 − x) = 15x − x².","P′ = 15 − 2x = 0 gives x = 7.5; P″ = −2 < 0, so this is a maximum.","Answer: 7.5 and 7.5 (product 56.25)."]]],
+q:[
+ ["The rate of change of the area of a circle with respect to its radius, when r = 5 cm, is:",["5π","10π","25π","2π"],1,"E","dA/dr = 2πr = 10π."],
+ ["f(x) = eˣ on R is:",["Strictly decreasing","Strictly increasing","Constant","Neither"],1,"E","f′(x) = eˣ > 0 for all x."],
+ ["f(x) = x² − 6x has a local minimum at:",["x = 0","x = 3","x = 6","x = −3"],1,"E","f′(x) = 2x − 6 = 0 at x = 3, and f″ = 2 > 0."],
+ ["The slope of the tangent to y = x² at x = 2 is:",["2","4","8","1"],1,"E","dy/dx = 2x = 4."],
+ ["If f′(c) = 0 and f″(c) < 0, then at x = c, f has a:",["Local minimum","Local maximum","Point of inflection always","No turning point"],1,"M","Second derivative test: f″ < 0 means the curve is concave down, so it is a maximum."]]},
+
+"Integrals":{ex:[
+ ["Find ∫ x sin x dx.",["By parts: ∫u dv = uv − ∫v du, with u = x and dv = sin x dx.","du = dx, v = −cos x.","= −x cos x + ∫cos x dx.","Answer: −x cos x + sin x + C."]],
+ ["Find ∫ dx/(x² + 4).",["∫ dx/(x² + a²) = (1/a) tan⁻¹(x/a) + C, with a = 2.","Answer: ½ tan⁻¹(x/2) + C."]],
+ ["Evaluate ∫₀^(π/2) sin²x dx.",["sin²x = (1 − cos 2x)/2.","∫ = [x/2 − sin 2x/4] from 0 to π/2 = π/4 − 0.","Answer: π/4."]]],
+q:[
+ ["∫ sec²x dx equals:",["tan x + C","sec x + C","sec x tan x + C","−cot x + C"],0,"E","d/dx (tan x) = sec²x."],
+ ["∫₀¹ x dx equals:",["1","1/2","0","2"],1,"E","[x²/2] from 0 to 1 = 1/2."],
+ ["∫ (1/x) dx equals:",["x⁻² + C","log|x| + C","1/x² + C","eˣ + C"],1,"E","d/dx (log|x|) = 1/x."],
+ ["If f is odd, ∫ from −a to a of f(x) dx equals:",["2∫₀ᵃ f(x) dx","0","a","f(a)"],1,"M","The areas on either side of 0 cancel."],
+ ["∫ eˣ[f(x) + f′(x)] dx equals:",["eˣ f′(x) + C","eˣ f(x) + C","f(x) + C","eˣ + C"],1,"M","d/dx [eˣ f(x)] = eˣ f(x) + eˣ f′(x)."]]},
+
+"Application of Integrals":{ex:[
+ ["Find the area enclosed by the ellipse x²/16 + y²/9 = 1.",["The area of x²/a² + y²/b² = 1 is πab (four times the first-quadrant area).","a = 4, b = 3.","Answer: 12π square units."]],
+ ["Find the area between y = x² and y = x.",["They meet where x² = x, i.e. x = 0 and x = 1. On (0, 1), the line is above the parabola.","Area = ∫₀¹ (x − x²) dx = [x²/2 − x³/3] from 0 to 1 = 1/2 − 1/3.","Answer: 1/6 square units."]],
+ ["Find the area bounded by the parabola y² = 4ax and its latus rectum x = a.",["The region is symmetric about the x-axis; the upper half is y = 2√(ax).","Area = 2∫₀ᵃ 2√(ax) dx = 4√a × (2/3)a^(3/2).","Answer: 8a²/3 square units."]]],
+q:[
+ ["The area of the circle x² + y² = 4 is:",["2π","4π","8π","16π"],1,"E","Radius 2, so πr² = 4π."],
+ ["The area under y = 2x from x = 0 to x = 3 is:",["6","9","18","3"],1,"E","∫₀³ 2x dx = [x²] from 0 to 3 = 9."],
+ ["The area between y = sin x and the x-axis from x = 0 to x = π is:",["1","2","π","0"],1,"M","∫₀^π sin x dx = [−cos x] from 0 to π = 1 + 1 = 2."],
+ ["The area enclosed by y = x and y = x³ in the first quadrant is:",["1/2","1/4","1/3","1/6"],1,"M","∫₀¹ (x − x³) dx = 1/2 − 1/4 = 1/4."],
+ ["The area of the ellipse x²/a² + y²/b² = 1 is:",["πa²","πab","2πab","π(a + b)"],1,"E","A standard result."]]},
+
+"Differential Equations":{ex:[
+ ["Find the order and degree of d³y/dx³ + 2 d²y/dx² + dy/dx = 0.",["Order = the highest derivative present = 3.","Degree = the power of that derivative (the equation is a polynomial in derivatives) = 1.","Answer: order 3, degree 1."]],
+ ["Solve dy/dx = (x + 1)/(2 − y), y ≠ 2.",["Separate the variables: (2 − y) dy = (x + 1) dx.","Integrate: 2y − y²/2 = x²/2 + x + C.","This is the general solution."]],
+ ["Solve dy/dx + y/x = x² (x > 0).",["Linear form with P = 1/x and Q = x².","Integrating factor = e^(∫dx/x) = x.","d(xy)/dx = x³, so xy = x⁴/4 + C.","Answer: y = x³/4 + C/x."]]],
+q:[
+ ["The general solution of a 4th-order differential equation has how many arbitrary constants?",["1","2","3","4"],3,"E","The number of constants equals the order."],
+ ["The integrating factor of dy/dx + Py = Q is:",["e^(∫Q dx)","e^(∫P dx)","∫P dx","e^P"],1,"E","Multiplying by e^(∫P dx) turns the left side into the derivative of y × IF."],
+ ["The order of y″ + (y′)³ + y = 0 is:",["1","2","3","Not defined"],1,"E","The highest derivative is y″."],
+ ["The general solution of dy/dx = y is:",["y = x + C","y = Ceˣ","y = Cx","y = e^(−x) + C"],1,"E","dy/y = dx gives log y = x + c, so y = Ceˣ."],
+ ["A homogeneous differential equation dy/dx = F(y/x) is solved by substituting:",["y = x + v","y = vx","x = y + v","y = v/x"],1,"M","Then dy/dx = v + x dv/dx and the variables separate."]]},
+
+"Vector Algebra":{ex:[
+ ["Find a·b for a = 2î + 3ĵ − k̂ and b = î − ĵ + 2k̂.",["a·b = a₁b₁ + a₂b₂ + a₃b₃.","= 2(1) + 3(−1) + (−1)(2) = 2 − 3 − 2.","Answer: −3."]],
+ ["Find the unit vector along a = î + ĵ + 2k̂.",["|a| = √(1 + 1 + 4) = √6.","â = a/|a|.","Answer: (î + ĵ + 2k̂)/√6."]],
+ ["Find the area of the parallelogram with adjacent sides a = 3î + ĵ + 4k̂ and b = î − ĵ + k̂.",["a × b = î(1·1 − 4·(−1)) − ĵ(3·1 − 4·1) + k̂(3·(−1) − 1·1).","= 5î + ĵ − 4k̂.","Area = |a × b| = √(25 + 1 + 16).","Answer: √42 square units."]]],
+q:[
+ ["For non-zero vectors, a·b = 0 means a and b are:",["Parallel","Perpendicular","Equal","Opposite"],1,"E","a·b = |a||b| cos θ = 0 gives θ = 90°."],
+ ["î × ĵ equals:",["k̂","−k̂","0","1"],0,"E","Cyclic order: î × ĵ = k̂, ĵ × k̂ = î, k̂ × î = ĵ."],
+ ["The projection of a on b is:",["a·b/|a|","a·b/|b|","|a × b|/|b|","a·b"],1,"M","|a| cos θ = a·b/|b|."],
+ ["|a × b| equals:",["|a||b| cos θ","|a||b| sin θ","|a| + |b|","|a||b|"],1,"E","The magnitude of the cross product is the area of the parallelogram."],
+ ["The magnitude of 3î − 4ĵ is:",["7","5","1","25"],1,"E","√(9 + 16) = 5."]]},
+
+"Three Dimensional Geometry":{ex:[
+ ["Find the direction cosines of the line through (−2, 4, −5) and (1, 2, 3).",["Direction ratios = (1 + 2, 2 − 4, 3 + 5) = (3, −2, 8).","Length = √(9 + 4 + 64) = √77.","Answer: (3/√77, −2/√77, 8/√77)."]],
+ ["Find the angle between lines with direction ratios (2, 2, 1) and (4, 1, 8).",["cos θ = |a₁a₂ + b₁b₂ + c₁c₂| / (√(a₁² + b₁² + c₁²) √(a₂² + b₂² + c₂²)).","= (8 + 2 + 8)/(3 × 9) = 18/27 = 2/3.","Answer: θ = cos⁻¹(2/3)."]],
+ ["Find the equation of the line through (5, 2, −4) parallel to 3î + 2ĵ − 8k̂.",["Vector form: r = a + λb.","r = (5î + 2ĵ − 4k̂) + λ(3î + 2ĵ − 8k̂).","Cartesian form: (x − 5)/3 = (y − 2)/2 = (z + 4)/(−8)."]]],
+q:[
+ ["If l, m, n are direction cosines of a line, then l² + m² + n² equals:",["0","1","3","Depends on the line"],1,"E","They are the components of a unit vector."],
+ ["The direction cosines of the x-axis are:",["(0, 1, 0)","(1, 0, 0)","(1, 1, 1)","(0, 0, 1)"],1,"E","The x-axis makes angles 0°, 90°, 90° with the axes."],
+ ["Two lines with direction ratios (a₁, b₁, c₁) and (a₂, b₂, c₂) are perpendicular if:",["a₁/a₂ = b₁/b₂ = c₁/c₂","a₁a₂ + b₁b₂ + c₁c₂ = 0","a₁ + a₂ = 0","a₁b₁c₁ = a₂b₂c₂"],1,"E","cos θ = 0 when the dot product is zero."],
+ ["The distance between (1, 2, 3) and (4, 6, 3) is:",["5","7","25","√7"],0,"E","√(3² + 4² + 0²) = 5."],
+ ["Skew lines are lines that:",["Intersect","Are parallel","Are neither parallel nor intersecting","Lie in one plane"],2,"E","They exist only in space (3D)."]]},
+
+"Linear Programming":{ex:[
+ ["Maximise Z = 3x + 4y subject to x + y ≤ 4, x ≥ 0, y ≥ 0.",["The feasible region is the triangle with corners (0, 0), (4, 0) and (0, 4).","Z(0, 0) = 0, Z(4, 0) = 12, Z(0, 4) = 16.","Answer: maximum Z = 16 at (0, 4)."]],
+ ["Minimise Z = 200x + 500y subject to x + 2y ≥ 10, 3x + 4y ≤ 24, x, y ≥ 0.",["The lines x + 2y = 10 and 3x + 4y = 24 meet at (4, 3).","Corner points: (0, 5), (4, 3), (0, 6).","Z(0, 5) = 2500, Z(4, 3) = 800 + 1500 = 2300, Z(0, 6) = 3000.","Answer: minimum Z = 2300 at (4, 3)."]]],
+q:[
+ ["In an LPP, the optimal value (if it exists) occurs at:",["The origin only","A corner point of the feasible region","The centre of the region","Any interior point"],1,"E","The corner point theorem."],
+ ["The feasible region of an LPP is the set of points that:",["Satisfy at least one constraint","Satisfy all the constraints","Maximise Z","Lie on the axes"],1,"E","Every constraint, including x, y ≥ 0, must hold."],
+ ["The corners of a feasible region are (0, 0), (2, 0), (0, 3) and (1, 2). The maximum of Z = x + y is:",["2","3","4","5"],1,"M","Z = 0, 2, 3, 3. The maximum is 3 (at two corners)."],
+ ["The constraints x ≥ 0, y ≥ 0 are called:",["Objective functions","Non-negative constraints","Optimal solutions","Decision functions"],1,"E","Quantities like the number of items made cannot be negative."],
+ ["If the feasible region is unbounded, then:",["A maximum always exists","A maximum may not exist","A minimum never exists","No solution exists"],1,"M","An extra check (an open half-plane test) is needed to confirm the optimum."]]},
+
+"Probability":{ex:[
+ ["P(A) = 0.8, P(B) = 0.5 and P(B|A) = 0.4. Find P(A ∩ B), P(A|B) and P(A ∪ B).",["P(A ∩ B) = P(A) × P(B|A) = 0.8 × 0.4 = 0.32.","P(A|B) = P(A ∩ B)/P(B) = 0.32/0.5 = 0.64.","P(A ∪ B) = 0.8 + 0.5 − 0.32 = 0.98."]],
+ ["Bag I has 3 red and 4 black balls; Bag II has 5 red and 6 black. A bag is chosen at random and a red ball is drawn. Find the probability it came from Bag II.",["P(E₁) = P(E₂) = 1/2; P(R|E₁) = 3/7, P(R|E₂) = 5/11.","Bayes' theorem: P(E₂|R) = (1/2)(5/11) / [(1/2)(3/7) + (1/2)(5/11)].","= (5/11) / (3/7 + 5/11) = (35/77) / (68/77).","Answer: 35/68."]],
+ ["A coin is tossed twice. Find the mean number of heads.",["X can be 0, 1 or 2 with probabilities 1/4, 1/2, 1/4.","Mean = Σx·p = 0 × 1/4 + 1 × 1/2 + 2 × 1/4.","Answer: 1."]]],
+q:[
+ ["Events A and B are independent if:",["P(A ∩ B) = 0","P(A ∩ B) = P(A)P(B)","P(A) + P(B) = 1","P(A|B) = P(B)"],1,"E","Then P(A|B) = P(A)."],
+ ["If A and B are independent with P(A) = 1/2 and P(B) = 1/3, then P(A ∩ B) is:",["5/6","1/6","1/3","1/2"],1,"E","1/2 × 1/3 = 1/6."],
+ ["Two dice are thrown. Given that the first shows 4, the probability that the total is 8 is:",["1/6","1/36","5/36","1/3"],0,"M","The second die must show 4: probability 1/6."],
+ ["The probabilities in a probability distribution add up to:",["0","1","Depends on n","The mean"],1,"E","One of the outcomes must happen."],
+ ["A coin is tossed 3 times. P(at least one head) is:",["1/8","3/8","7/8","1/2"],2,"E","1 − P(no heads) = 1 − 1/8 = 7/8."]]}
+});
+
+NC("12","Biology",{
+"Sexual Reproduction in Flowering Plants":{ex:[
+ ["Why is the endosperm of angiosperms triploid?",["One male gamete (n) fuses with the two polar nuclei (n + n) in the central cell.","This 'triple fusion' gives the primary endosperm nucleus: n + n + n = 3n.","Answer: so the endosperm that develops from it is triploid."]],
+ ["Give the ploidy of: microspore mother cell, functional megaspore, nucellus, zygote, endosperm.",["Microspore mother cell: 2n (it divides by meiosis).","Functional megaspore: n.","Nucellus: 2n (tissue of the ovule).","Zygote: 2n. Endosperm: 3n."]],
+ ["How do geitonogamy and xenogamy differ?",["Geitonogamy: pollen goes to a different flower on the same plant. Genetically it is like self-pollination.","Xenogamy: pollen goes to a flower on a different plant. It brings in new gene combinations."]]],
+q:[
+ ["A typical mature embryo sac has:",["7 nuclei, 8 cells","8 nuclei, 7 cells","8 nuclei, 8 cells","4 nuclei, 4 cells"],1,"M","Three antipodals, two synergids, one egg and one central cell with two polar nuclei."],
+ ["The filiform apparatus is found in the:",["Antipodal cells","Synergids","Egg cell","Central cell"],1,"E","It guides the pollen tube into the synergid."],
+ ["Apomixis is:",["Fusion of two gametes","Forming seeds without fertilisation","Self-pollination","Growth of the pollen tube"],1,"E","Seeds form asexually, e.g. in some grasses and Asteraceae."],
+ ["Wind-pollinated flowers usually have:",["Bright petals and nectar","Light, dry pollen and feathery stigmas","Sticky pollen","A strong scent"],1,"E","Large amounts of light pollen are carried by air and caught by feathery stigmas (e.g. maize)."],
+ ["Polyembryony is commonly seen in:",["Wheat","Citrus","Rice","Pea"],1,"E","Nucellar cells in citrus can form extra embryos."]]},
+
+"Human Reproduction":{ex:[
+ ["How many sperms come from one primary spermatocyte, and how many eggs from one primary oocyte?",["Primary spermatocyte → meiosis I → 2 secondary spermatocytes → meiosis II → 4 spermatids → 4 sperms.","Primary oocyte → meiosis I gives a secondary oocyte + first polar body; meiosis II gives one ovum + second polar body.","Answer: 4 sperms, but only 1 ovum."]],
+ ["What causes ovulation, and when does it happen in a 28-day cycle?",["LH and FSH reach a peak in the middle of the cycle (the LH surge).","The LH surge makes the Graafian follicle burst and release the ovum.","Answer: about day 14."]],
+ ["List the functions of the placenta.",["Passes oxygen and nutrients to the foetus and removes CO₂ and wastes.","Acts as an endocrine gland: hCG, hPL, oestrogens and progesterone."]]],
+q:[
+ ["Leydig cells in the testes secrete:",["Oestrogen","Androgens (testosterone)","FSH","Inhibin only"],1,"E","Interstitial (Leydig) cells make androgens."],
+ ["In humans, fertilisation usually takes place in the:",["Uterus","Ampullary region of the fallopian tube","Cervix","Ovary"],1,"E","The ovum and sperm meet in the ampulla."],
+ ["The blastocyst embeds itself in the:",["Myometrium","Endometrium","Perimetrium","Cervix"],1,"E","This is implantation, in the uterine lining."],
+ ["Sertoli cells:",["Secrete testosterone","Nourish developing sperm","Make up seminal fluid","Store sperm"],1,"E","They support and nourish germ cells in the seminiferous tubules."],
+ ["The acrosome of a sperm contains:",["Mitochondria","Enzymes that help it enter the ovum","DNA","The flagellum"],1,"E","Its enzymes break through the egg's outer layers."]]},
+
+"Reproductive Health":{ex:[
+ ["Why is amniocentesis for sex determination banned in India?",["Amniocentesis tests foetal cells in the amniotic fluid for genetic disorders.","It was being misused to find the sex of the foetus, leading to female foeticide.","So it is allowed only for medical reasons."]],
+ ["How do oral contraceptive pills prevent pregnancy?",["They contain progestogens or a progestogen–oestrogen mix.","They stop ovulation and implantation.","They also thicken the cervical mucus, which blocks sperm."]],
+ ["Name some assisted reproductive technologies (ART).",["IVF-ET (in vitro fertilisation and embryo transfer), ZIFT, IUT.","GIFT (gamete intrafallopian transfer).","ICSI (intracytoplasmic sperm injection).","AI / IUI (artificial insemination)."]]],
+q:[
+ ["Copper-releasing IUDs work by:",["Stopping ovulation","Reducing sperm motility and their ability to fertilise","Blocking the vas deferens","Making hormones"],1,"E","Cu ions act on sperm (e.g. Cu-T, Multiload 375)."],
+ ["'Saheli', the once-a-week oral pill developed at CDRI Lucknow, is:",["Steroidal","Non-steroidal","An IUD","A barrier method"],1,"M","It has few side effects and high contraceptive value."],
+ ["Medical termination of pregnancy is considered fairly safe up to the end of the:",["First trimester","Second trimester","Third trimester","Ninth month"],0,"E","Up to about 12 weeks."],
+ ["Vasectomy is a sterilisation method in which the:",["Fallopian tubes are cut","Vas deferens is cut and tied","Uterus is removed","Ovaries are removed"],1,"E","Sperm can no longer travel out of the testes."],
+ ["Which sexually transmitted infection is NOT completely curable?",["Gonorrhoea","Syphilis","Hepatitis B","Chlamydiasis"],2,"M","Hepatitis B, genital herpes and HIV cannot be fully cured."]]},
+
+"Principles of Inheritance and Variation":{ex:[
+ ["Cross two heterozygous tall pea plants (Tt × Tt). Give the genotype and phenotype ratios.",["Gametes from each: T and t.","Offspring: TT, Tt, Tt, tt.","Genotypes 1 TT : 2 Tt : 1 tt.","Phenotypes 3 tall : 1 dwarf."]],
+ ["A man with blood group A (IᴬI°) marries a woman with group B (IᴮI°). What blood groups can their children have?",["Gametes: Iᴬ or I° from the father; Iᴮ or I° from the mother.","Children: IᴬIᴮ (AB), IᴬI° (A), IᴮI° (B), I°I° (O).","Answer: A, B, AB and O, each with probability 1/4."]],
+ ["What is a test cross and why is it used?",["Cross the dominant-looking plant with a homozygous recessive (tt).","All offspring dominant → the plant is TT.","1 dominant : 1 recessive → the plant is Tt.","It reveals an unknown genotype."]]],
+q:[
+ ["ABO blood groups show:",["Incomplete dominance only","Multiple alleles and codominance","Polygenic inheritance","Sex-linked inheritance"],1,"M","There are three alleles (Iᴬ, Iᴮ, i); Iᴬ and Iᴮ are codominant."],
+ ["In snapdragon, red × white gives pink F₁, and the F₂ ratio is 1 red : 2 pink : 1 white. This is:",["Codominance","Incomplete dominance","Epistasis","Linkage"],1,"E","The heterozygote is in between the two parents."],
+ ["Sickle cell anaemia is caused by replacing:",["Valine with glutamic acid","Glutamic acid with valine at position 6 of β-globin","Lysine with glycine","Glycine with proline"],1,"M","A single base change, GAG → GUG."],
+ ["Haemophilia is a:",["Y-linked trait","Sex-linked recessive trait","Autosomal dominant trait","Chromosomal disorder"],1,"E","It is carried on X. Women are usually carriers; men show the disease."],
+ ["Down's syndrome is caused by:",["Trisomy of chromosome 21","Monosomy X","XXY","Trisomy of chromosome 18"],0,"E","There is an extra copy of chromosome 21."]]},
+
+"Molecular Basis of Inheritance":{ex:[
+ ["A DNA sample has 20% adenine. Find the percentages of the other bases.",["Chargaff's rule: A = T and G = C.","T = 20%, so A + T = 40%.","G + C = 60%, so G = C = 30%."]],
+ ["The coding strand of a gene reads 5′-ATGCATGC-3′. Write the mRNA.",["mRNA has the same sequence as the coding strand, with U in place of T.","Answer: 5′-AUGCAUGC-3′."]],
+ ["A human diploid cell has 6.6 × 10⁹ bp of DNA. Find its length (distance between bp = 0.34 nm).",["Length = number of bp × 0.34 × 10⁻⁹ m.","= 6.6 × 10⁹ × 0.34 × 10⁻⁹ m.","Answer: about 2.2 m."]]],
+q:[
+ ["Okazaki fragments are made on the:",["Leading strand","Lagging strand","mRNA","tRNA"],1,"E","DNA polymerase works only 5′→3′, so the lagging strand is made in short pieces."],
+ ["Hershey and Chase showed that the genetic material is:",["Protein","DNA","RNA","Lipid"],1,"E","Radioactive ³²P (in DNA) entered the bacteria; ³⁵S (in protein) did not."],
+ ["The start codon AUG codes for:",["Valine","Methionine","Glycine","No amino acid"],1,"E","AUG is the initiator codon and also codes for methionine."],
+ ["The inducer of the lac operon is:",["Glucose","Lactose (allolactose)","Galactose only","The repressor"],1,"E","It binds the repressor so that transcription can begin."],
+ ["The process of copying DNA into RNA is called:",["Replication","Transcription","Translation","Transduction"],1,"E","Translation is protein synthesis from mRNA."]]},
+
+"Evolution":{ex:[
+ ["How do homologous and analogous organs differ? Give examples.",["Homologous: same basic structure, different jobs, e.g. forelimbs of whale, bat, cheetah and human. This shows divergent evolution.","Analogous: different structure, same job, e.g. wings of a butterfly and a bird. This shows convergent evolution."]],
+ ["How does industrial melanism in moths support natural selection?",["Before industrialisation, white moths blended with pale lichens, so birds ate the dark ones.","Soot darkened tree trunks, so white moths became easy to spot.","Dark moths survived and became more common: the environment selected the fitter form."]],
+ ["In a population in Hardy–Weinberg equilibrium, 16% of people show a recessive trait. Find the allele frequencies and the proportion of carriers.",["q² = 0.16, so q = 0.4.","p = 1 − q = 0.6.","Carriers = 2pq = 2 × 0.6 × 0.4 = 0.48 (48%)."]]],
+q:[
+ ["In Miller's experiment, which were formed from CH₄, NH₃, H₂ and water vapour with electric sparks?",["Nucleic acids","Amino acids","Whole proteins","Cells"],1,"E","It showed that simple organic molecules could form under early-Earth conditions."],
+ ["Darwin's finches of the Galápagos are an example of:",["Convergent evolution","Adaptive radiation","Mutation","Genetic drift only"],1,"E","Many species with different beaks evolved from one ancestor."],
+ ["The founder effect is a type of:",["Natural selection","Genetic drift","Mutation","Gene flow"],1,"M","A small group starts a new population with gene frequencies that differ by chance."],
+ ["The mutation theory of evolution was proposed by:",["Darwin","Lamarck","Hugo de Vries","Mendel"],2,"E","He worked on the evening primrose."],
+ ["The brain size of Homo erectus was about:",["650 cc","900 cc","1400 cc","400 cc"],1,"M","Homo habilis ~650–800 cc; Homo erectus ~900 cc; Homo sapiens ~1400 cc."]]},
+
+"Human Health and Disease":{ex:[
+ ["Outline how Plasmodium causes malaria.",["A female Anopheles mosquito injects sporozoites when it bites.","They multiply in liver cells and then in red blood cells, which burst.","This releases haemozoin, a toxin that causes chills and high fever every 3–4 days."]],
+ ["How do active and passive immunity differ? Give examples.",["Active: the body makes its own antibodies after infection or vaccination. It is slow but long-lasting.","Passive: ready-made antibodies are given, e.g. through colostrum (IgA) or an anti-tetanus injection. It is quick but short-lived."]],
+ ["How does HIV weaken the immune system?",["HIV enters macrophages, which then keep making copies of the virus.","It attacks helper T-lymphocytes, so their number falls.","The person then catches infections easily (AIDS). It is diagnosed by ELISA."]]],
+q:[
+ ["Typhoid fever is confirmed by the:",["ELISA test","Widal test","Mantoux test","PCR only"],1,"E","Typhoid is caused by Salmonella typhi."],
+ ["An antibody molecule is written as:",["H₂L₂","H₄L₂","HL","H₂L₄"],0,"E","Two heavy and two light polypeptide chains."],
+ ["The primary lymphoid organs are:",["Spleen and lymph nodes","Bone marrow and thymus","Tonsils and appendix","Liver and kidney"],1,"E","Lymphocytes are formed and mature there."],
+ ["Morphine is obtained from:",["Cannabis sativa","Papaver somniferum","Erythroxylum coca","Atropa belladonna"],1,"E","Opium poppy latex. Heroin is made from morphine."],
+ ["An allergic response is due to the release of:",["Insulin","Histamine and serotonin (with IgE antibodies)","Interferons","Thyroxine"],1,"E","Mast cells release histamine; antihistamines are used for treatment."]]},
+
+"Microbes in Human Welfare":{ex:[
+ ["Why does dough rise when baker's yeast is added?",["Saccharomyces cerevisiae ferments the sugars in the dough.","It releases CO₂ gas.","The gas makes the dough puff up."]],
+ ["What does a high BOD of water tell us?",["BOD is the oxygen microbes use to break down organic matter in 1 L of water.","High BOD means a lot of organic matter, so the water is highly polluted.","Secondary sewage treatment is run until the BOD falls."]],
+ ["How is biogas produced and what does it contain?",["Methanogens (e.g. Methanobacterium) break down cattle dung anaerobically in a digester.","The gas is mainly methane, with CO₂ and H₂.","It is used as fuel; the leftover slurry is a good fertiliser."]]],
+q:[
+ ["Lactobacillus turns milk into curd and also raises the level of:",["Vitamin A","Vitamin B₁₂","Vitamin C","Vitamin D"],1,"M","Lactic acid bacteria improve curd's nutritional value."],
+ ["Penicillin was discovered by:",["Louis Pasteur","Alexander Fleming","Robert Koch","Edward Jenner"],1,"E","From the mould Penicillium notatum."],
+ ["Cyclosporin A, used to prevent transplant rejection, comes from:",["Monascus purpureus","Trichoderma polysporum","Aspergillus niger","Streptococcus"],1,"M","It is an immunosuppressant."],
+ ["Statins that lower blood cholesterol come from:",["Monascus purpureus","Penicillium","Clostridium","Trichoderma"],0,"M","They compete with the enzyme that makes cholesterol."],
+ ["Bacillus thuringiensis is used as a:",["Biofertiliser","Biocontrol agent against caterpillars","Source of insulin","Nitrogen fixer"],1,"E","Its Bt toxin kills insect larvae."]]},
+
+"Biotechnology: Principles and Processes":{ex:[
+ ["How does EcoRI cut DNA?",["It recognises the palindrome 5′-GAATTC-3′.","It cuts between G and A on both strands.","This leaves overhanging single-stranded 'sticky ends' that pair with other DNA cut by the same enzyme."]],
+ ["What are the three steps of PCR?",["Denaturation: heat (~94 °C) separates the DNA strands.","Annealing: primers bind to the template.","Extension: Taq polymerase (heat-stable) builds new strands. Repeating the cycle multiplies the DNA many times."]],
+ ["How does insertional inactivation help pick out recombinant colonies?",["The foreign DNA is put into the gene for β-galactosidase.","On a chromogenic substrate, recombinants can't make the enzyme, so they give white colonies.","Non-recombinants give blue colonies."]]],
+q:[
+ ["Restriction endonucleases cut DNA:",["At random","At specific palindromic sequences","Only at the ends","Only RNA"],1,"E","Each enzyme recognises its own short sequence."],
+ ["In gel electrophoresis, DNA moves toward the:",["Cathode","Anode","Middle of the gel","It does not move"],1,"E","DNA is negatively charged (phosphate groups)."],
+ ["In a cloning vector, 'ori' is:",["The antibiotic resistance gene","The origin of replication","A restriction site","A promoter only"],1,"E","It starts replication and controls copy number."],
+ ["The vector pBR322 has resistance genes for:",["Ampicillin and tetracycline","Kanamycin only","Streptomycin and ampicillin","Chloramphenicol"],0,"E","ampR and tetR are its selectable markers."],
+ ["The Ti plasmid used to put genes into plants comes from:",["E. coli","Agrobacterium tumefaciens","Bacillus thuringiensis","Rhizobium"],1,"E","It has been 'disarmed' so it no longer causes tumours."]]},
+
+"Biotechnology and its Applications":{ex:[
+ ["How does Bt cotton resist bollworms?",["It carries cry genes (e.g. cryIAc, cryIIAb) from Bacillus thuringiensis.","The toxin is made as an inactive protoxin.","In the alkaline gut of the insect it becomes active, damages the gut lining and kills the larva."]],
+ ["How was tobacco protected from the nematode Meloidogyne incognita?",["Nematode genes were put into the plant using Agrobacterium.","The plant made both sense and antisense RNA, forming double-stranded RNA.","This silenced the nematode's mRNA (RNA interference), so the parasite could not survive."]],
+ ["How was human insulin made by genetic engineering?",["Insulin has two chains, A and B, joined by disulphide bridges.","Eli Lilly made DNA for each chain and put it into separate E. coli plasmids.","The chains were collected and joined to form human insulin."]]],
+q:[
+ ["The first gene therapy (1990) was given for:",["Diabetes","ADA deficiency","Cancer","Haemophilia"],1,"E","A four-year-old girl with adenosine deaminase deficiency."],
+ ["Golden rice is rich in:",["Iron","Vitamin A (β-carotene)","Vitamin C","Protein"],1,"E","It was made to fight vitamin A deficiency."],
+ ["The transgenic cow Rosie produced milk containing human:",["Insulin","Alpha-lactalbumin","Interferon","Growth hormone"],1,"M","Her milk was more balanced nutritionally for babies."],
+ ["The Indian body that checks GM research and the safety of GM organisms is the:",["ICMR","GEAC","DBT only","WHO"],1,"E","The Genetic Engineering Appraisal Committee."],
+ ["Using another country's bio-resources without proper permission or payment is called:",["Bioremediation","Biopiracy","Biofortification","Bioprospecting"],1,"E","Examples: attempts to patent basmati rice and turmeric."]]},
+
+"Organisms and Populations":{ex:[
+ ["A pond had 20 lotus plants last year; 8 new plants were added by reproduction. Find the birth rate.",["Birth rate = new individuals / starting population.","= 8/20.","Answer: 0.4 offspring per lotus plant per year."]],
+ ["In a lab population of 40 fruit flies, 4 died in a week. Find the death rate.",["Death rate = deaths / population = 4/40.","Answer: 0.1 individuals per fruit fly per week."]],
+ ["How do exponential and logistic growth differ?",["Exponential: dN/dt = rN, with unlimited resources. It gives a J-shaped curve.","Logistic: dN/dt = rN(K − N)/K, with limited resources. It gives an S-shaped curve that levels off at the carrying capacity K."]]],
+q:[
+ ["A lichen is an example of:",["Parasitism","Mutualism","Commensalism","Predation"],1,"E","An alga and a fungus both benefit."],
+ ["An orchid growing on a mango branch is an example of:",["Parasitism","Commensalism","Mutualism","Amensalism"],1,"E","The orchid benefits; the mango is unaffected."],
+ ["'Two closely related species competing for the same resource cannot coexist indefinitely' is:",["Allen's rule","Gause's competitive exclusion principle","Liebig's law","Darwin's theory"],1,"E","The weaker competitor is eventually removed."],
+ ["Logistic population growth gives a curve that is:",["J-shaped","S-shaped (sigmoid)","A straight line","U-shaped"],1,"E","Growth slows as the population nears K."],
+ ["A cuckoo laying its eggs in a crow's nest is an example of:",["Mutualism","Brood parasitism","Commensalism","Competition"],1,"E","The host raises the parasite's young."]]},
+
+"Ecosystem":{ex:[
+ ["Producers in a food chain fix 10 000 J. How much energy reaches the tertiary consumer?",["Lindeman's 10% law: about 10% passes to each next level.","Primary consumer 1000 J → secondary 100 J → tertiary 10 J.","Answer: about 10 J."]],
+ ["Why is the pyramid of biomass inverted in the sea?",["Phytoplankton (the producers) are tiny and short-lived.","At any moment their biomass is less than that of the fish that eat them.","They reproduce quickly, so they can still support the larger biomass above them."]],
+ ["How are gross and net primary productivity related?",["GPP is the total rate at which plants make organic matter by photosynthesis.","Plants use part of it in respiration (R).","NPP = GPP − R: what is left for consumers."]]],
+q:[
+ ["The correct order of steps in decomposition is:",["Leaching → fragmentation → humification","Fragmentation → leaching → catabolism → humification → mineralisation","Mineralisation → humification → fragmentation","Catabolism → fragmentation → leaching"],1,"M","Detritivores break detritus into small pieces first."],
+ ["The pioneer species on bare rock are usually:",["Mosses","Lichens","Grasses","Shrubs"],1,"E","They release acids that start breaking the rock into soil."],
+ ["Which ecological pyramid is always upright?",["Number","Biomass","Energy","None"],2,"E","Energy is lost at each level, so the pyramid of energy can never be inverted."],
+ ["Which cycle has no significant gaseous phase?",["Carbon","Nitrogen","Phosphorus","Oxygen"],2,"M","Phosphorus is stored mainly in rocks."],
+ ["A detritus food chain begins with:",["Green plants","Dead organic matter","Herbivores","Carnivores"],1,"E","Decomposers feed on detritus."]]},
+
+"Biodiversity and Conservation":{ex:[
+ ["State the species–area relationship given by Alexander von Humboldt.",["Within a region, species richness rises with the area explored, up to a limit.","On a log scale: log S = log C + Z log A.","Z (the slope) is usually 0.1–0.2, but steeper (0.6–1.2) for very large areas such as whole continents."]],
+ ["What is the 'evil quartet' of biodiversity loss?",["Habitat loss and fragmentation.","Over-exploitation.","Invasion by alien species.","Co-extinctions."]],
+ ["How do in situ and ex situ conservation differ?",["In situ: protecting species in their natural home, e.g. national parks, sanctuaries, biosphere reserves, sacred groves.","Ex situ: protecting them outside it, e.g. zoos, botanical gardens, seed banks, cryopreservation."]]],
+q:[
+ ["India has parts of how many biodiversity hotspots?",["2","3","4","5"],1,"M","Western Ghats and Sri Lanka, Indo-Burma, and the Himalaya."],
+ ["A seed bank is an example of:",["In situ conservation","Ex situ conservation","A sacred grove","A biosphere reserve"],1,"E","Genetic material is stored outside the natural habitat."],
+ ["The Nile perch introduced into Lake Victoria caused the extinction of many:",["Frogs","Cichlid fish","Birds","Water plants"],1,"E","A classic case of alien species invasion."],
+ ["The Amazon rainforest is called the 'lungs of the planet' because it:",["Has the most animals","Produces a large share of the Earth's oxygen","Is the largest desert","Has the most rainfall"],1,"E","It is very large and very productive."],
+ ["Sacred groves are an example of:",["Ex situ conservation","Community-based in situ conservation","Zoos","Gene banks"],1,"E","Local communities protect these forest patches for religious reasons."]]}
+});
+
+NC("10","Science",{
+"Chemical Reactions and Equations":{ex:[
+ ["Balance: Fe + H₂O → Fe₃O₄ + H₂.",["Fe₃O₄ has 3 Fe, so put 3 before Fe: 3Fe + H₂O → Fe₃O₄ + H₂.","Fe₃O₄ has 4 O, so put 4 before H₂O: 3Fe + 4H₂O → Fe₃O₄ + H₂.","There are now 8 H on the left, so put 4 before H₂.","Answer: 3Fe + 4H₂O → Fe₃O₄ + 4H₂."]],
+ ["In CuO + H₂ → Cu + H₂O, which substance is oxidised and which is reduced?",["CuO loses oxygen, so it is reduced to Cu.","H₂ gains oxygen, so it is oxidised to H₂O.","Both happen together, so this is a redox reaction."]],
+ ["Why is respiration called an exothermic reaction?",["Glucose combines with oxygen in our cells: C₆H₁₂O₆ + 6O₂ → 6CO₂ + 6H₂O + energy.","The reaction releases energy, so it is exothermic."]]],
+q:[
+ ["Mixing lead nitrate and potassium iodide solutions gives a yellow precipitate. This is a:",["Combination reaction","Double displacement (precipitation) reaction","Decomposition reaction","Redox reaction only"],1,"E","Pb(NO₃)₂ + 2KI → PbI₂ (yellow) + 2KNO₃: the ions swap partners."],
+ ["Heating limestone: CaCO₃ → CaO + CO₂. This is:",["Combination","Thermal decomposition","Displacement","Neutralisation"],1,"E","Heat breaks one compound into simpler ones."],
+ ["Fe + CuSO₄ → FeSO₄ + Cu is an example of:",["Displacement","Decomposition","Combination","Double displacement"],0,"E","Iron is more reactive than copper, so it pushes copper out of its salt."],
+ ["Rancidity of food can be slowed by:",["Adding salt only","Adding antioxidants or flushing with nitrogen","Keeping it in sunlight","Adding water"],1,"M","Rancidity is oxidation of fats and oils."],
+ ["Silver chloride turns grey in sunlight. This is:",["Thermal decomposition","Photolytic decomposition","Electrolytic decomposition","Combination"],1,"E","2AgCl → 2Ag + Cl₂ in light; used in black-and-white photography."]]},
+
+"Acids, Bases and Salts":{ex:[
+ ["Why does tooth decay start when the mouth's pH falls below 5.5?",["Bacteria break down sugar and food left in the mouth and make acids.","Below pH 5.5, tooth enamel (calcium hydroxyapatite) starts to dissolve.","Basic toothpaste neutralises the acid and helps prevent decay."]],
+ ["What happens when baking soda is heated?",["2NaHCO₃ → Na₂CO₃ + H₂O + CO₂.","The CO₂ released makes cakes and bread soft and spongy."]],
+ ["How is Plaster of Paris made and why does it set hard?",["Gypsum is heated to 373 K: CaSO₄·2H₂O → CaSO₄·½H₂O + 1½H₂O.","Mixed with water, it takes the water back and becomes gypsum again, a hard solid.","That is why it is used for plasters on broken bones."]]],
+q:[
+ ["The pH of pure water at 25 °C is:",["0","7","14","1"],1,"E","Neutral: [H⁺] = [OH⁻]."],
+ ["An acid reacting with a metal gives off a gas that burns with a pop sound. The gas is:",["O₂","H₂","CO₂","Cl₂"],1,"E","Zn + H₂SO₄ → ZnSO₄ + H₂."],
+ ["The chemical formula of bleaching powder is:",["CaCO₃","CaOCl₂","NaOCl","Ca(OH)₂"],1,"E","Ca(OH)₂ + Cl₂ → CaOCl₂ + H₂O."],
+ ["Washing soda is:",["NaHCO₃","Na₂CO₃·10H₂O","NaCl","CaSO₄·½H₂O"],1,"E","Sodium carbonate decahydrate."],
+ ["Which is used as an antacid?",["Vinegar","Milk of magnesia","Lemon juice","Hydrochloric acid"],1,"E","Mg(OH)₂ is a mild base that neutralises extra stomach acid."]]},
+
+"Metals and Non-metals":{ex:[
+ ["Show how sodium chloride forms by transfer of electrons.",["Na (2, 8, 1) loses one electron: Na → Na⁺ + e⁻.","Cl (2, 8, 7) gains it: Cl + e⁻ → Cl⁻.","The oppositely charged ions attract: Na⁺Cl⁻, an ionic compound."]],
+ ["What is the thermit reaction and what is it used for?",["Fe₂O₃ + 2Al → 2Fe + Al₂O₃ + a lot of heat.","Aluminium is more reactive, so it takes oxygen from iron oxide.","The molten iron is used to join railway tracks and broken machine parts."]],
+ ["How do roasting and calcination differ?",["Roasting: heating a sulphide ore in plenty of air, e.g. 2ZnS + 3O₂ → 2ZnO + 2SO₂.","Calcination: heating a carbonate ore with little or no air, e.g. ZnCO₃ → ZnO + CO₂."]]],
+q:[
+ ["The metal that is liquid at room temperature is:",["Sodium","Mercury","Gallium only when solid","Aluminium"],1,"E","Mercury (bromine is the liquid non-metal)."],
+ ["Aqua regia is a mixture of conc. HCl and conc. HNO₃ in the ratio:",["1 : 3","3 : 1","1 : 1","2 : 1"],1,"E","It can dissolve gold and platinum."],
+ ["Which metal is the most reactive?",["Copper","Iron","Potassium","Zinc"],2,"E","K is at the top of the reactivity series."],
+ ["Coating iron with zinc to stop rusting is called:",["Alloying","Galvanisation","Anodising","Electroplating with tin"],1,"E","Zinc protects the iron even if the coating is scratched."],
+ ["Which non-metal is lustrous?",["Sulphur","Iodine","Carbon (charcoal)","Phosphorus"],1,"M","Iodine is a shiny non-metal; graphite is another exception."]]},
+
+"Carbon and its Compounds":{ex:[
+ ["How is ethyl ethanoate (an ester) made?",["Ethanoic acid reacts with ethanol, with a little conc. H₂SO₄ as catalyst.","CH₃COOH + C₂H₅OH → CH₃COOC₂H₅ + H₂O.","Esters smell sweet and are used in perfumes and flavours."]],
+ ["How does soap remove oily dirt?",["A soap molecule has an ionic (water-loving) head and a long hydrocarbon (oil-loving) tail.","In water, the tails dig into the oil and the heads face outward, forming a micelle.","The micelles are washed away with water, taking the oil with them."]],
+ ["What happens when vegetable oil is heated with hydrogen and nickel?",["Hydrogen adds across the C=C double bonds (hydrogenation).","The unsaturated oil becomes a saturated solid fat, e.g. vanaspati ghee."]]],
+q:[
+ ["The functional group in ethanol is:",["–CHO","–OH","–COOH","C=O"],1,"E","Alcohols contain the hydroxyl group."],
+ ["The next member of the homologous series after CH₄ is:",["C₂H₄","C₂H₆","C₃H₈","C₂H₂"],1,"E","Successive members differ by –CH₂–."],
+ ["How many structural isomers does butane (C₄H₁₀) have?",["1","2","3","4"],1,"M","n-butane and isobutane (2-methylpropane)."],
+ ["Soap in hard water forms:",["Lather easily","Scum","An ester","A gas"],1,"E","Ca²⁺ and Mg²⁺ ions form insoluble salts with soap."],
+ ["Carbon mostly forms which type of bond?",["Ionic","Covalent","Metallic","Hydrogen"],1,"E","It shares electrons because gaining or losing four would be too hard."]]},
+
+"Life Processes":{ex:[
+ ["Write the overall equation for photosynthesis.",["6CO₂ + 12H₂O → C₆H₁₂O₆ + 6O₂ + 6H₂O, using sunlight and chlorophyll.","Steps: chlorophyll absorbs light; light energy splits water; CO₂ is reduced to carbohydrate."]],
+ ["What is double circulation and why is it useful?",["Blood passes through the heart twice in each full circuit: body → heart → lungs → heart → body.","Oxygenated and deoxygenated blood never mix.","This gives a very efficient oxygen supply, needed by warm-blooded animals like birds and mammals."]],
+ ["What happens to pyruvate in yeast, in our muscles, and in mitochondria?",["Yeast (no oxygen): pyruvate → ethanol + CO₂.","Muscles (short of oxygen): pyruvate → lactic acid, which causes cramps.","Mitochondria (with oxygen): pyruvate → CO₂ + H₂O, releasing the most energy."]]],
+q:[
+ ["Photosynthesis takes place in the:",["Mitochondria","Chloroplasts","Ribosomes","Nucleus"],1,"E","Chloroplasts contain chlorophyll."],
+ ["The working unit of the kidney is the:",["Neuron","Nephron","Alveolus","Villus"],1,"E","Each kidney has about a million nephrons."],
+ ["Water moves up a plant through the:",["Phloem","Xylem","Stomata","Cambium"],1,"E","Phloem carries food."],
+ ["Bile, which breaks fat into tiny droplets, is made by the:",["Pancreas","Liver","Stomach","Small intestine"],1,"E","It is stored in the gall bladder."],
+ ["Stomata open and close because of:",["Root hairs","Guard cells","Xylem vessels","Phloem cells"],1,"E","Guard cells swell when they take in water, opening the pore."]]},
+
+"Control and Coordination":{ex:[
+ ["Trace the path of a reflex arc when you touch a hot object.",["Receptor in the skin → sensory neuron → spinal cord, where a relay neuron passes the message on.","→ motor neuron → effector (arm muscle), which pulls the hand away.","The spinal cord responds before the brain is told, so it is very fast."]],
+ ["Why does a plant shoot bend towards light?",["Auxin is made at the shoot tip.","With light from one side, auxin moves to the shaded side.","Cells there grow longer, so the shoot bends toward the light (phototropism)."]],
+ ["Why is iodised salt recommended?",["The thyroid gland needs iodine to make thyroxine.","Thyroxine controls how the body uses carbohydrates, proteins and fats.","Without enough iodine, the neck swells (goitre)."]]],
+q:[
+ ["A plant hormone that slows growth and causes leaves to wilt is:",["Auxin","Gibberellin","Abscisic acid","Cytokinin"],2,"E","The others promote growth."],
+ ["Body balance and posture are kept by the:",["Cerebrum","Cerebellum","Medulla","Hypothalamus"],1,"E","The cerebellum controls precise movements."],
+ ["Blood sugar is controlled by insulin from the:",["Thyroid","Pancreas","Adrenal","Pituitary"],1,"E","A lack of insulin causes diabetes."],
+ ["The small gap between two neurons is called a:",["Dendrite","Synapse","Axon","Myelin"],1,"E","Chemicals carry the message across it."],
+ ["Leaves of the touch-me-not plant fold when touched. This movement is:",["Growth-dependent","Not related to growth (changes in water in cells)","Phototropism","Geotropism"],1,"M","Cells quickly lose water and change shape."]]},
+
+"How do Organisms Reproduce?":{ex:[
+ ["How do binary fission and multiple fission differ?",["Binary fission: one cell splits into two, e.g. Amoeba, Leishmania.","Multiple fission: the nucleus divides many times inside a cyst, giving many daughter cells at once, e.g. Plasmodium."]],
+ ["Give two advantages of vegetative propagation.",["Plants that don't make seeds (banana, rose, orange) can be grown.","Every new plant is exactly like the parent, so good traits are kept.","Plants flower and fruit sooner than plants grown from seed."]],
+ ["How do contraceptive methods work? Give one example of each kind.",["Barrier: a condom stops sperm reaching the egg (and protects against STDs).","Hormonal: oral pills change hormone levels so eggs are not released.","IUDs (Copper-T) stop implantation; surgery (vasectomy, tubectomy) blocks the path of gametes."]]],
+q:[
+ ["Planaria can grow a whole body from a cut piece. This is:",["Budding","Regeneration","Fragmentation","Spore formation"],1,"E","Special cells rebuild all the missing parts."],
+ ["Hydra reproduces asexually by:",["Binary fission","Budding","Spores","Fragmentation"],1,"E","A bud grows out of the body and breaks away."],
+ ["The male reproductive part of a flower is the:",["Pistil","Stamen","Ovary","Stigma"],1,"E","Its anther makes pollen grains."],
+ ["In humans, fertilisation usually happens in the:",["Uterus","Oviduct (fallopian tube)","Vagina","Ovary"],1,"E","The zygote then moves to the uterus to implant."],
+ ["Small errors in copying DNA during reproduction are important because they:",["Kill the organism","Bring variation, which helps species survive","Stop reproduction","Make all offspring identical"],1,"M","Variation gives the raw material for evolution."]]},
+
+"Heredity":{ex:[
+ ["Mendel crossed pure tall (TT) with pure dwarf (tt) pea plants and self-crossed the F₁. Give the results.",["F₁: all Tt, so all tall (tall is dominant).","F₂ from Tt × Tt: TT, Tt, Tt, tt.","Phenotype ratio 3 tall : 1 dwarf; genotype ratio 1 : 2 : 1."]],
+ ["How is the sex of a baby decided in humans?",["The mother always gives an X chromosome.","The father gives either X or Y.","XX → girl, XY → boy, so the father's sperm decides the sex."]],
+ ["What ratio did Mendel get in the F₂ of a cross between round-yellow and wrinkled-green seeds?",["F₁: all round and yellow (both dominant).","F₂: 9 round yellow : 3 round green : 3 wrinkled yellow : 1 wrinkled green.","This showed that the two traits are inherited independently."]]],
+q:[
+ ["A plant with genotype TT is:",["Heterozygous","Homozygous dominant","Homozygous recessive","A hybrid"],1,"E","Both copies are the same dominant allele."],
+ ["Human body cells have how many pairs of chromosomes?",["22","23","46","44"],1,"E","22 pairs of autosomes + 1 pair of sex chromosomes."],
+ ["The cross Tt × tt gives tall and dwarf plants in the ratio:",["3 : 1","1 : 1","1 : 2 : 1","All tall"],1,"M","Half the offspring are Tt, half are tt."],
+ ["Mendel did his experiments on:",["Drosophila","Garden pea","Maize","Snapdragon"],1,"E","Pisum sativum."],
+ ["A gene is:",["A protein","A segment of DNA that carries information for a trait","A whole chromosome","A cell organelle"],1,"E","Genes control traits by coding for proteins."]]},
+
+"Light – Reflection and Refraction":{ex:[
+ ["A 2 cm tall object is 25 cm from a convex lens of focal length 10 cm. Find the image position and size.",["1/v − 1/u = 1/f, with u = −25 cm, f = +10 cm.","1/v = 1/10 − 1/25 = (5 − 2)/50 = 3/50, so v = +16.7 cm.","m = v/u = 16.7/(−25) = −0.67, so h′ = −0.67 × 2 = −1.33 cm.","Answer: real, inverted, 1.33 cm tall, 16.7 cm behind the lens."]],
+ ["The refractive index of glass is 1.5. Find the speed of light in glass.",["n = c/v, so v = c/n.","v = 3 × 10⁸ / 1.5.","Answer: v = 2 × 10⁸ m s⁻¹."]],
+ ["Find the power of a concave lens of focal length 2 m.",["A concave lens has a negative focal length: f = −2 m.","P = 1/f = 1/(−2).","Answer: P = −0.5 D."]]],
+q:[
+ ["Rear-view mirrors in vehicles are:",["Plane","Concave","Convex","Cylindrical"],2,"E","They always give an upright image and show a wider view."],
+ ["The lens formula is:",["1/v + 1/u = 1/f","1/v − 1/u = 1/f","v − u = f","uv = f"],1,"E","For mirrors it is 1/v + 1/u = 1/f."],
+ ["For a concave mirror, an object at C (centre of curvature) gives an image:",["At F","At C, real, inverted, same size","Behind the mirror","At infinity"],1,"M","Rays from C come back through C."],
+ ["Light travels fastest in:",["Glass","Water","Vacuum","Diamond"],2,"E","Any material slows it down; n = c/v ≥ 1."],
+ ["The SI unit of the power of a lens is the:",["Metre","Dioptre","Watt","Joule"],1,"E","1 D = 1 m⁻¹."]]},
+
+"The Human Eye and the Colourful World":{ex:[
+ ["A short-sighted person's far point is 80 cm. What lens do they need?",["The lens must make distant objects (u = ∞) appear at the far point (v = −80 cm).","So f = −80 cm: a concave lens.","P = 1/f = 1/(−0.8 m) = −1.25 D."]],
+ ["A long-sighted person's near point is 1 m. What lens lets them read at 25 cm?",["u = −25 cm and the image must be at v = −100 cm.","1/f = 1/v − 1/u = −1/100 + 1/25 = 3/100, so f = +33.3 cm.","P = +3.0 D (a convex lens)."]],
+ ["Why is the sky blue, and why are danger signals red?",["Air molecules scatter short wavelengths (blue) much more than long ones.","This scattered blue light reaches us from all over the sky.","Red is scattered least, so it travels furthest through fog and smoke; it is used for danger signals."]]],
+q:[
+ ["The eye's ability to change the focal length of its lens is called:",["Persistence of vision","Accommodation","Dispersion","Refraction"],1,"E","Ciliary muscles change the lens's shape."],
+ ["The near point of a normal eye is:",["10 cm","25 cm","1 m","Infinity"],1,"E","The least distance of distinct vision."],
+ ["Stars twinkle because of:",["Reflection","Atmospheric refraction","Dispersion","Scattering"],1,"E","Air layers keep changing and bend the starlight by different amounts."],
+ ["White light splitting into colours through a prism is called:",["Reflection","Dispersion","Scattering","Diffraction"],1,"E","Each colour bends by a different amount."],
+ ["Presbyopia is usually corrected with:",["Concave lenses","Bifocal lenses","Plane glass","Cylindrical lenses"],1,"E","The upper part corrects distant vision and the lower part near vision."]]},
+
+"Electricity":{ex:[
+ ["A current of 0.5 A flows for 10 minutes. How much charge passes?",["Q = It.","Q = 0.5 × (10 × 60) = 0.5 × 600.","Answer: Q = 300 C."]],
+ ["Resistors of 5 Ω, 10 Ω and 30 Ω are in parallel across a 12 V battery. Find the current in each and the total.",["Each has 12 V across it: I₁ = 12/5 = 2.4 A, I₂ = 12/10 = 1.2 A, I₃ = 12/30 = 0.4 A.","Total I = 2.4 + 1.2 + 0.4 = 4 A.","Total resistance = 12/4 = 3 Ω."]],
+ ["A 100 W bulb is on for 10 hours. How much energy does it use in kWh and in joules?",["E = P × t = 0.1 kW × 10 h = 1 kWh.","1 kWh = 3.6 × 10⁶ J.","Answer: 1 kWh = 3.6 × 10⁶ J (one 'unit')."]]],
+q:[
+ ["The SI unit of resistivity is:",["Ω","Ω m","Ω/m","V/A"],1,"E","ρ = RA/l."],
+ ["An ammeter is connected in a circuit:",["In parallel","In series","Either way","Only across the battery"],1,"E","All the current must flow through it."],
+ ["1 kWh equals:",["3.6 × 10³ J","3.6 × 10⁶ J","1000 J","3600 J"],1,"E","1000 W × 3600 s."],
+ ["The heat produced in a resistor is given by:",["H = IRt","H = I²Rt","H = V/R","H = IR²t"],1,"E","Joule's law of heating."],
+ ["Resistors of 2 Ω, 3 Ω and 5 Ω in series give:",["10 Ω","0.97 Ω","30 Ω","5 Ω"],0,"E","In series, resistances add."]]},
+
+"Magnetic Effects of Electric Current":{ex:[
+ ["How do you find the direction of the magnetic field around a straight current-carrying wire?",["Right-hand thumb rule: hold the wire in your right hand with the thumb pointing along the current.","Your curled fingers show the direction of the circular field lines."]],
+ ["How does Fleming's left-hand rule give the direction of force on a wire in a magnetic field?",["Stretch the thumb, forefinger and middle finger of the left hand at right angles.","Forefinger = field, middle finger = current.","Thumb = direction of the force (motion). Electric motors use this."]],
+ ["Why are the earth wire and the fuse important in house wiring?",["Earth wire: if a metal appliance becomes live, current flows safely to the ground instead of through a person.","Fuse: it melts and breaks the circuit when too much current flows (overload or short circuit)."]]],
+q:[
+ ["The magnetic field inside a long solenoid carrying current is:",["Zero","Uniform","Highest at the ends","Circular"],1,"E","The parallel field lines inside show a uniform field."],
+ ["Two magnetic field lines:",["Can cross","Never cross","Always meet at the poles","Are always straight"],1,"E","If they crossed, the field would point two ways at one point."],
+ ["A fuse works on the:",["Magnetic effect of current","Heating effect of current","Chemical effect of current","Induction effect"],1,"E","Its wire melts when it gets too hot."],
+ ["An electric motor changes:",["Mechanical energy into electrical","Electrical energy into mechanical","Heat into electrical","Light into electrical"],1,"E","A generator does the reverse."],
+ ["In house wiring, the earth wire's insulation is usually:",["Red","Black","Green","Blue"],2,"E","Live is red/brown, neutral is black/blue."]]},
+
+"Our Environment":{ex:[
+ ["Producers trap 1000 J of energy. How much reaches the secondary consumers?",["About 10% passes from one level to the next.","Primary consumers: 100 J.","Secondary consumers: 10 J."]],
+ ["What is biological magnification?",["Non-biodegradable chemicals (e.g. DDT) enter a food chain.","They are not broken down or excreted, so they build up at each level.","Top consumers, including humans, end up with the highest concentration."]],
+ ["How do CFCs damage the ozone layer, and why does it matter?",["In the upper atmosphere, CFCs release chlorine that breaks down ozone (O₃).","Ozone absorbs harmful UV rays from the Sun.","Less ozone means more UV reaching Earth, which can cause skin cancer."]]],
+q:[
+ ["Which of these is biodegradable?",["Plastic bag","Vegetable peel","Glass bottle","DDT"],1,"E","Microbes can break it down."],
+ ["In an ecosystem, the producers are:",["Herbivores","Green plants","Decomposers","Carnivores"],1,"E","They make food by photosynthesis."],
+ ["Ozone is formed by:",["O₂ + O₂","O₂ + O","H₂O + O","CO₂ + O"],1,"M","UV splits O₂ into O atoms, which join O₂ to form O₃."],
+ ["Pesticides build up to the highest concentration in:",["Producers","Herbivores","Top consumers","Decomposers"],2,"E","Biological magnification."],
+ ["Bacteria and fungi in an ecosystem are:",["Producers","Decomposers","Herbivores","Carnivores"],1,"E","They return nutrients to the soil."]]}
+});
+
+NC("10","Maths",{
+"Real Numbers":{ex:[
+ ["Find the HCF and LCM of 96 and 404 by prime factorisation.",["96 = 2⁵ × 3 and 404 = 2² × 101.","HCF = product of the smallest powers of common primes = 2² = 4.","LCM = 96 × 404 / HCF = 38 784 / 4 = 9696.","Answer: HCF = 4, LCM = 9696."]],
+ ["Check that HCF × LCM = product of the numbers, for 26 and 91.",["26 = 2 × 13, 91 = 7 × 13.","HCF = 13, LCM = 2 × 7 × 13 = 182.","HCF × LCM = 13 × 182 = 2366 = 26 × 91. ✓"]],
+ ["Prove that √2 is irrational.",["Suppose √2 = a/b, with a and b co-prime integers.","Then 2b² = a², so a² is even, so a is even. Write a = 2c.","Then 2b² = 4c², so b² = 2c², so b is even too.","a and b both even contradicts 'co-prime', so √2 is irrational."]]],
+q:[
+ ["HCF of 12 and 18 is:",["3","6","36","2"],1,"E","12 = 2² × 3, 18 = 2 × 3²; common part = 2 × 3 = 6."],
+ ["Prime factorisation of 140 is:",["2 × 7 × 10","2² × 5 × 7","2³ × 5 × 7","4 × 35"],1,"E","140 = 4 × 35 = 2² × 5 × 7."],
+ ["The product of the HCF and LCM of 6 and 20 is:",["60","120","2","26"],1,"E","It always equals the product of the two numbers: 6 × 20 = 120."],
+ ["Which number is irrational?",["√16","√3","0.25","22/7"],1,"E","√3 cannot be written as p/q."],
+ ["LCM of 12, 15 and 21 is:",["420","210","180","1260"],0,"M","2² × 3 × 5 × 7 = 420."]]},
+
+"Polynomials":{ex:[
+ ["Find the zeroes of x² − 2x − 8 and check the relation with the coefficients.",["x² − 2x − 8 = (x − 4)(x + 2), so the zeroes are 4 and −2.","Sum = 2 = −b/a = −(−2)/1. ✓","Product = −8 = c/a = −8/1. ✓"]],
+ ["Find a quadratic polynomial whose zeroes have sum −3 and product 2.",["p(x) = x² − (sum)x + (product).","= x² − (−3)x + 2.","Answer: x² + 3x + 2."]],
+ ["Find the zeroes of 6x² − 7x − 3.",["Split the middle term: 6x² − 9x + 2x − 3 = 3x(2x − 3) + 1(2x − 3) = (3x + 1)(2x − 3).","Answer: x = −1/3 and x = 3/2."]]],
+q:[
+ ["A cubic polynomial can have at most how many zeroes?",["1","2","3","4"],2,"E","At most as many as its degree."],
+ ["The sum of the zeroes of 2x² − 8x + 6 is:",["−4","4","3","−3"],1,"E","−b/a = 8/2 = 4."],
+ ["The product of the zeroes of x² + 7x + 10 is:",["7","−7","10","−10"],2,"E","c/a = 10."],
+ ["The graph of a quadratic polynomial is a:",["Straight line","Parabola","Circle","Hyperbola"],1,"E","It opens up if a > 0 and down if a < 0."],
+ ["If 2 is a zero of x² − 5x + k, then k is:",["6","−6","10","4"],0,"M","4 − 10 + k = 0, so k = 6."]]},
+
+"Pair of Linear Equations in Two Variables":{ex:[
+ ["Solve x + y = 14 and x − y = 4.",["Add the equations: 2x = 18, so x = 9.","Then y = 14 − 9 = 5.","Answer: x = 9, y = 5."]],
+ ["5 pencils and 7 pens cost ₹50; 7 pencils and 5 pens cost ₹46. Find the cost of one pencil and one pen.",["Let a pencil cost ₹x and a pen ₹y: 5x + 7y = 50 and 7x + 5y = 46.","Add: 12x + 12y = 96, so x + y = 8.","Subtract: 2y − 2x = 4, so y − x = 2.","Answer: pen ₹5, pencil ₹3."]],
+ ["Do 3x + 2y = 5 and 2x − 3y = 7 have a unique solution?",["a₁/a₂ = 3/2 and b₁/b₂ = 2/(−3).","3/2 ≠ −2/3, so the lines intersect.","Answer: yes, exactly one solution (consistent)."]]],
+q:[
+ ["If two lines are parallel, the pair of equations has:",["One solution","No solution","Infinitely many solutions","Two solutions"],1,"E","Parallel lines never meet."],
+ ["If a₁/a₂ = b₁/b₂ = c₁/c₂, the equations have:",["No solution","A unique solution","Infinitely many solutions","Exactly two solutions"],2,"E","The lines are the same (coincident)."],
+ ["The solution of 2x + 3y = 11 and 2x − 4y = −24 is:",["x = 2, y = 5","x = −2, y = 5","x = 5, y = −2","x = 1, y = 3"],1,"M","Subtract: 7y = 35, so y = 5; then 2x = 11 − 15 = −4, so x = −2."],
+ ["For what k do kx + 2y = 5 and 3x + y = 1 have no solution?",["3","6","2","5"],1,"M","Need k/3 = 2/1 ≠ 5/1, so k = 6."],
+ ["The graph of a linear equation in two variables is a:",["Curve","Straight line","Circle","Point"],1,"E","Every solution lies on one line."]]},
+
+"Quadratic Equations":{ex:[
+ ["Solve 2x² − 5x + 3 = 0.",["Split the middle term: 2x² − 2x − 3x + 3 = 2x(x − 1) − 3(x − 1) = (2x − 3)(x − 1).","Answer: x = 3/2 or x = 1."]],
+ ["What is the nature of the roots of 2x² − 4x + 3 = 0?",["D = b² − 4ac = 16 − 24 = −8.","D < 0.","Answer: no real roots."]],
+ ["The product of two consecutive positive integers is 306. Find them.",["Let them be x and x + 1: x² + x − 306 = 0.","(x + 18)(x − 17) = 0, so x = 17 (x must be positive).","Answer: 17 and 18."]]],
+q:[
+ ["The roots of x² − 9 = 0 are:",["3 only","±3","9","±9"],1,"E","x² = 9."],
+ ["A quadratic has two equal real roots when:",["D > 0","D = 0","D < 0","D = 1"],1,"E","Then x = −b/2a."],
+ ["For equal roots of 2x² + kx + 3 = 0, k is:",["±6","±2√6","±√6","±24"],1,"M","k² − 24 = 0, so k = ±√24 = ±2√6."],
+ ["The roots of ax² + bx + c = 0 are given by:",["x = (−b ± √(b² − 4ac))/2a","x = (b ± √(b² − 4ac))/2a","x = −b/2a","x = (−b ± √(b² + 4ac))/2a"],0,"E","The quadratic formula."],
+ ["The equation x² + x + 1 = 0 has:",["Two equal real roots","Two distinct real roots","No real roots","One root"],2,"M","D = 1 − 4 = −3 < 0."]]},
+
+"Arithmetic Progressions":{ex:[
+ ["Find the 10th term of the AP 2, 7, 12, …",["a = 2, d = 5.","aₙ = a + (n − 1)d = 2 + 9 × 5.","Answer: 47."]],
+ ["Find the sum of the first 22 terms of 8, 3, −2, …",["a = 8, d = −5, n = 22.","Sₙ = (n/2)[2a + (n − 1)d] = 11[16 + 21 × (−5)] = 11(16 − 105).","Answer: S₂₂ = −979."]],
+ ["Which term of 3, 8, 13, … is 78?",["3 + (n − 1)5 = 78.","(n − 1)5 = 75, so n − 1 = 15.","Answer: the 16th term."]]],
+q:[
+ ["The common difference of 3, 1, −1, −3, … is:",["2","−2","1","−1"],1,"E","1 − 3 = −2."],
+ ["The sum of the first 100 natural numbers is:",["5000","5050","10 100","4950"],1,"E","n(n + 1)/2 = 100 × 101/2."],
+ ["The 30th term of 10, 7, 4, … is:",["97","−77","77","−87"],1,"M","10 + 29(−3) = 10 − 87 = −77."],
+ ["Which of these is an AP?",["2, 4, 8, 16","1, 3, 6, 10","3, 3 + √2, 3 + 2√2, 3 + 3√2","1, −1, 1, −1"],2,"M","Each term increases by √2."],
+ ["How many two-digit numbers are divisible by 3?",["30","33","29","31"],0,"M","12, 15, …, 99: n = (99 − 12)/3 + 1 = 30."]]},
+
+"Triangles":{ex:[
+ ["In △ABC, DE ∥ BC with D on AB and E on AC. If AD/DB = 3/4 and AE = 6 cm, find EC.",["Basic Proportionality Theorem: AD/DB = AE/EC.","3/4 = 6/EC.","Answer: EC = 8 cm."]],
+ ["A 6 m pole casts a 4 m shadow. At the same time a tower casts a 28 m shadow. Find the tower's height.",["The sun's rays make the same angle, so the two triangles are similar (AA).","Height/shadow is the same: h/28 = 6/4.","Answer: h = 42 m."]],
+ ["The sides of two similar triangles are in the ratio 4 : 9. Find the ratio of their areas.",["The ratio of areas of similar triangles = (ratio of sides)².","(4/9)² = 16/81.","Answer: 16 : 81."]]],
+q:[
+ ["All congruent triangles are:",["Never similar","Similar","Right-angled","Equilateral"],1,"E","Same shape and same size."],
+ ["Which is NOT a criterion for similarity of triangles?",["AAA","SSS","SAS","ASS"],3,"M","AAA (AA), SSS and SAS are the criteria."],
+ ["The areas of two similar triangles are in the ratio 25 : 36. Their sides are in the ratio:",["25 : 36","5 : 6","625 : 1296","6 : 5"],1,"E","Take the square root."],
+ ["The Basic Proportionality Theorem is also called:",["Pythagoras' theorem","Thales' theorem","Euclid's lemma","Apollonius' theorem"],1,"E","A line parallel to one side divides the other two sides in the same ratio."],
+ ["In △ABC, DE ∥ BC, AD = 2 cm, DB = 3 cm and AE = 4 cm. EC is:",["6 cm","5 cm","2.67 cm","8 cm"],0,"M","2/3 = 4/EC, so EC = 6 cm."]]},
+
+"Coordinate Geometry":{ex:[
+ ["Find the distance between (2, 3) and (4, 1).",["d = √[(x₂ − x₁)² + (y₂ − y₁)²] = √[(2)² + (−2)²] = √8.","Answer: 2√2 units."]],
+ ["Find the point that divides the join of (4, −3) and (8, 5) internally in the ratio 3 : 1.",["Section formula: ((m₁x₂ + m₂x₁)/(m₁ + m₂), (m₁y₂ + m₂y₁)/(m₁ + m₂)).","x = (3 × 8 + 1 × 4)/4 = 7; y = (3 × 5 + 1 × (−3))/4 = 3.","Answer: (7, 3)."]],
+ ["Find the midpoint of (−1, 7) and (5, −3).",["Midpoint = ((x₁ + x₂)/2, (y₁ + y₂)/2).","= ((−1 + 5)/2, (7 − 3)/2).","Answer: (2, 2)."]]],
+q:[
+ ["The distance of (3, 4) from the origin is:",["7","5","1","25"],1,"E","√(9 + 16) = 5."],
+ ["The midpoint of (2, 4) and (6, 8) is:",["(4, 6)","(8, 12)","(3, 4)","(2, 2)"],0,"E","((2 + 6)/2, (4 + 8)/2)."],
+ ["A point on the x-axis has:",["x = 0","y = 0","x = y","x + y = 0"],1,"E","It is at zero height."],
+ ["The distance between (0, 0) and (−5, 12) is:",["7","13","17","√119"],1,"E","√(25 + 144) = 13."],
+ ["The point dividing (−1, 7) and (4, −3) in the ratio 2 : 3 is:",["(1, 3)","(2, 1)","(1.5, 2)","(3, 1)"],0,"M","x = (8 − 3)/5 = 1, y = (−6 + 21)/5 = 3."]]},
+
+"Introduction to Trigonometry":{ex:[
+ ["If sin A = 3/4, find cos A and tan A.",["Take a right triangle with opposite = 3 and hypotenuse = 4.","Adjacent = √(16 − 9) = √7.","cos A = √7/4, tan A = 3/√7."]],
+ ["Evaluate sin 60° cos 30° + sin 30° cos 60°.",["= (√3/2)(√3/2) + (1/2)(1/2) = 3/4 + 1/4.","Answer: 1."]],
+ ["Prove that 1 + tan²A = sec²A.",["Start from sin²A + cos²A = 1.","Divide each term by cos²A: tan²A + 1 = 1/cos²A = sec²A. ✓"]]],
+q:[
+ ["tan 45° equals:",["0","1","√3","1/√3"],1,"E","sin 45° = cos 45°."],
+ ["sin²θ + cos²θ equals:",["0","1","2","tan θ"],1,"E","The basic identity."],
+ ["If tan A = 1 (A acute), then A is:",["30°","45°","60°","90°"],1,"E","tan 45° = 1."],
+ ["cosec 30° equals:",["1/2","2","√3","2/√3"],1,"E","1/sin 30° = 1/(1/2)."],
+ ["2 tan 30° / (1 + tan²30°) equals:",["sin 60°","cos 60°","tan 60°","sin 30°"],0,"M","= 2(1/√3)/(4/3) = √3/2 = sin 60°."]]},
+
+"Some Applications of Trigonometry":{ex:[
+ ["From a point 30 m from the foot of a tower, the angle of elevation of the top is 30°. Find the height.",["tan 30° = h/30.","h = 30 × (1/√3) = 10√3.","Answer: h = 10√3 m ≈ 17.3 m."]],
+ ["A kite string is 60 m long and makes 60° with the ground. How high is the kite? (Assume the string is straight.)",["sin 60° = h/60.","h = 60 × √3/2.","Answer: h = 30√3 m ≈ 52 m."]],
+ ["What is the angle of elevation of the sun when a pole's shadow equals its height?",["tan θ = height/shadow = 1.","Answer: θ = 45°."]]],
+q:[
+ ["A 10 m ladder makes 60° with the ground. The height it reaches on the wall is:",["5 m","5√3 m","10√3 m","10 m"],1,"M","h = 10 sin 60° = 5√3."],
+ ["The angle of depression from A to B equals the angle of elevation from B to A because they are:",["Vertically opposite angles","Alternate angles","Complementary angles","Supplementary angles"],1,"E","The horizontal lines at A and B are parallel."],
+ ["A tower's shadow is √3 times its height. The angle of elevation of the sun is:",["30°","45°","60°","90°"],0,"M","tan θ = 1/√3."],
+ ["The angle of elevation of a tower's top from 50 m away is 45°. Its height is:",["25 m","50 m","50√3 m","100 m"],1,"E","h = 50 tan 45° = 50."],
+ ["The line joining the observer's eye to the object is the:",["Horizontal line","Line of sight","Vertical line","Tangent"],1,"E","Angles of elevation and depression are measured between it and the horizontal."]]},
+
+"Circles":{ex:[
+ ["A point is 5 cm from the centre of a circle of radius 3 cm. Find the length of the tangent from it.",["The radius meets the tangent at 90°, so use Pythagoras.","Tangent = √(5² − 3²) = √16.","Answer: 4 cm."]],
+ ["Prove that the two tangents from an external point are equal in length.",["Let PA and PB be tangents from P to a circle with centre O.","△OAP and △OBP: OA = OB (radii), OP is common, and ∠OAP = ∠OBP = 90°.","So the triangles are congruent (RHS), giving PA = PB."]],
+ ["Two concentric circles have radii 5 cm and 3 cm. Find the length of a chord of the larger circle that touches the smaller one.",["The radius of the small circle (3 cm) is perpendicular to the chord and bisects it.","Half the chord = √(5² − 3²) = 4 cm.","Answer: chord = 8 cm."]]],
+q:[
+ ["How many tangents can be drawn to a circle from a point outside it?",["1","2","Infinitely many","0"],1,"E","Exactly two, equal in length."],
+ ["The tangent at any point of a circle is ___ to the radius through that point.",["Parallel","Perpendicular","Equal","Inclined at 45°"],1,"E","A basic theorem."],
+ ["The tangent from Q is 24 cm long and Q is 25 cm from the centre. The radius is:",["7 cm","1 cm","49 cm","12 cm"],0,"M","√(25² − 24²) = √49 = 7."],
+ ["How many tangents can be drawn from a point inside a circle?",["1","2","0","Infinitely many"],2,"E","Every line through it cuts the circle twice."],
+ ["A line meeting a circle at exactly one point is a:",["Chord","Secant","Tangent","Diameter"],2,"E","A secant meets it at two points."]]},
+
+"Areas Related to Circles":{ex:[
+ ["Find the area of a sector of radius 6 cm and angle 60°. (π = 22/7)",["Area = (θ/360°) × πr² = (60/360) × (22/7) × 36.","= (1/6) × 792/7 = 132/7.","Answer: ≈ 18.86 cm²."]],
+ ["A clock's minute hand is 14 cm long. Find the area it sweeps in 5 minutes.",["In 60 min it turns 360°, so in 5 min it turns 30°.","Area = (30/360) × (22/7) × 14² = (1/12) × 616.","Answer: ≈ 51.33 cm²."]],
+ ["Find the length of an arc of radius 21 cm and angle 60°.",["Arc = (θ/360°) × 2πr = (1/6) × 2 × (22/7) × 21.","Answer: 22 cm."]]],
+q:[
+ ["The area of a circle of radius 7 cm is:",["44 cm²","154 cm²","49 cm²","22 cm²"],1,"E","(22/7) × 49 = 154."],
+ ["The circumference of a circle of radius 7 cm is:",["22 cm","44 cm","154 cm","14 cm"],1,"E","2 × (22/7) × 7 = 44."],
+ ["The area of a quadrant of a circle of radius 14 cm is:",["616 cm²","154 cm²","308 cm²","44 cm²"],1,"M","(1/4) × (22/7) × 196 = 154."],
+ ["The perimeter of a sector of radius r and arc length l is:",["l","r + l","2r + l","2πr"],2,"E","Two radii plus the arc."],
+ ["A wheel of radius 35 cm covers 22 m in how many full turns?",["10","20","5","100"],0,"M","Circumference = 220 cm; 2200/220 = 10."]]},
+
+"Surface Areas and Volumes":{ex:[
+ ["A toy is a cone on a hemisphere, both of radius 3.5 cm; total height 15.5 cm. Find its total surface area.",["Cone height = 15.5 − 3.5 = 12 cm; slant height l = √(12² + 3.5²) = √156.25 = 12.5 cm.","Surface = hemisphere CSA + cone CSA = 2πr² + πrl = πr(2r + l).","= (22/7) × 3.5 × (7 + 12.5) = 11 × 19.5.","Answer: 214.5 cm²."]],
+ ["Two cubes of volume 64 cm³ each are joined end to end. Find the surface area of the cuboid formed.",["Edge = ∛64 = 4 cm, so the cuboid is 8 × 4 × 4 cm.","SA = 2(lb + bh + hl) = 2(32 + 16 + 32).","Answer: 160 cm²."]]],
+q:[
+ ["The volume of a cone is:",["πr²h","⅓πr²h","⅔πr³","4/3 πr³"],1,"E","One-third of the cylinder with the same base and height."],
+ ["The curved surface area of a cylinder is:",["πr²h","2πrh","2πr(r + h)","πrl"],1,"E","Unroll it into a rectangle 2πr by h."],
+ ["The volume of a sphere of radius 3 cm is:",["36π cm³","27π cm³","12π cm³","108π cm³"],0,"M","(4/3)π × 27 = 36π."],
+ ["The total surface area of a solid hemisphere is:",["2πr²","3πr²","4πr²","πr²"],1,"E","Curved part 2πr² + flat base πr²."],
+ ["A cube has volume 64 cm³. Its edge is:",["8 cm","4 cm","16 cm","6 cm"],1,"E","∛64 = 4."]]},
+
+"Statistics":{ex:[
+ ["Find the mean: classes 0–10, 10–20, 20–30, 30–40 with frequencies 2, 3, 4, 1.",["Class marks: 5, 15, 25, 35.","Σfx = 10 + 45 + 100 + 35 = 190; Σf = 10.","Mean = 190/10.","Answer: 19."]],
+ ["The modal class is 40–50 (f₁ = 12), the class before has f₀ = 8 and the class after f₂ = 6. Find the mode.",["Mode = l + [(f₁ − f₀)/(2f₁ − f₀ − f₂)] × h.","= 40 + [(12 − 8)/(24 − 8 − 6)] × 10 = 40 + (4/10) × 10.","Answer: 44."]],
+ ["Mean = 20 and median = 21. Estimate the mode.",["Empirical relation: 3 Median = Mode + 2 Mean.","Mode = 3 × 21 − 2 × 20 = 63 − 40.","Answer: 23."]]],
+q:[
+ ["The mode of grouped data is:",["l + [(f₁ − f₀)/(2f₁ − f₀ − f₂)] h","l + [(n/2 − cf)/f] h","Σfx/Σf","(Max + Min)/2"],0,"E","The second is the median formula; the third is the mean."],
+ ["The class mark of 10–20 is:",["10","15","20","30"],1,"E","(10 + 20)/2."],
+ ["The median can be read from the point where the 'less than' and 'more than' ogives:",["Start","Intersect","End","Are parallel"],1,"M","The x-coordinate of their meeting point is the median."],
+ ["To find the median of grouped data you need the:",["Class marks only","Cumulative frequencies","Mode","Range"],1,"E","They locate the class containing n/2."],
+ ["3 Median − 2 Mean equals:",["Mode","Range","Mean","Median"],0,"E","The empirical relation."]]},
+
+"Probability":{ex:[
+ ["A die is thrown once. Find the probability of a prime number.",["Outcomes: 1, 2, 3, 4, 5, 6. Primes: 2, 3, 5.","P = 3/6.","Answer: 1/2."]],
+ ["A card is drawn from a well-shuffled deck of 52. Find P(a red king).",["There are 2 red kings (hearts and diamonds).","P = 2/52.","Answer: 1/26."]],
+ ["Two coins are tossed together. Find P(at least one head).",["Outcomes: HH, HT, TH, TT.","At least one head: HH, HT, TH = 3.","Answer: 3/4."]]],
+q:[
+ ["P(E) + P(not E) equals:",["0","1","0.5","2"],1,"E","An event either happens or it doesn't."],
+ ["The probability of an impossible event is:",["1","0","0.5","−1"],1,"E","It never happens."],
+ ["The probability of getting 7 on a normal die is:",["1/6","0","1/7","1"],1,"E","No face shows 7."],
+ ["A bag has 3 red and 5 black balls. P(red) is:",["3/5","3/8","5/8","1/3"],1,"E","3 red out of 8 balls."],
+ ["Which number cannot be a probability?",["0.7","2/3","1.5","0"],2,"E","Probability is between 0 and 1."]]}
+});
+
+NC("10","Social Science",{
+"History · The Rise of Nationalism in Europe":{ex:[
+ ["What steps did the French revolutionaries take to create a sense of collective identity among the French people?",["Ideas of la patrie (the fatherland) and le citoyen (the citizen) stressed a united community with equal rights.","A new French flag (the tricolour) replaced the royal standard.","The Estates General was elected by active citizens and renamed the National Assembly.","New hymns and oaths were composed, and martyrs were commemorated in the nation's name.","A centralised administrative system gave uniform laws for all citizens.","Internal customs duties were abolished and a uniform system of weights and measures was adopted.","French became the common language of the nation; regional dialects were discouraged."]],
+ ["Explain how the unification of Germany took place.",["The liberal attempt of 1848 (Frankfurt Parliament) failed because the monarchy and the military opposed it.","Prussia, under its chief minister Otto von Bismarck, then led the movement for unification.","Three wars over seven years (with Austria, Denmark and France) ended in Prussian victory.","In January 1871, the Prussian king William I was proclaimed German Emperor at Versailles."]]],
+q:[
+ ["The Treaty of Vienna (1815) was drawn up mainly to:",["Unify Germany","Undo most of the changes made during the Napoleonic wars","Spread liberalism","Free Greece"],1,"M","The conservative powers met in Vienna, hosted by Austrian Chancellor Duke Metternich, to restore monarchies."],
+ ["Who founded 'Young Italy'?",["Cavour","Garibaldi","Giuseppe Mazzini","Victor Emmanuel II"],2,"E","Mazzini founded Young Italy in Marseilles in 1831."],
+ ["The Napoleonic Code of 1804:",["Restored privileges based on birth","Established equality before the law and secured the right to property","Abolished private property","Banned trade"],1,"E","It removed birth privileges and simplified administration."],
+ ["Which treaty recognised Greece as an independent nation?",["Treaty of Vienna, 1815","Treaty of Constantinople, 1832","Treaty of Versailles, 1919","Treaty of Paris, 1856"],1,"M","Greece had fought a war of independence from the Ottoman Empire, which began in 1821."],
+ ["The female figure 'Marianne' was used as an allegory of the nation in:",["Germany","France","Italy","Britain"],1,"E","Germania was the allegory for Germany."]]},
+
+"History · Nationalism in India":{ex:[
+ ["Why did Gandhiji decide to launch a nationwide satyagraha against the Rowlatt Act (1919)?",["The Act was hurriedly passed by the Imperial Legislative Council despite united opposition from Indian members.","It gave the government enormous powers to repress political activities.","It allowed political prisoners to be detained without trial for two years.","Gandhiji wanted non-violent civil disobedience against such unjust laws, starting with a hartal on 6 April 1919."]],
+ ["Why did Gandhiji choose salt to begin the Civil Disobedience Movement?",["Salt was consumed by the rich and the poor alike; it was one of the most essential items of food.","The tax on salt and the government monopoly over its production were deeply unpopular.","Breaking the salt law could unite all sections of society against British rule.","Gandhiji started the Salt March from Sabarmati on 12 March 1930 and made salt at Dandi on 6 April 1930."]]],
+q:[
+ ["The Jallianwala Bagh massacre took place on:",["6 April 1919","13 April 1919","12 March 1930","1 August 1920"],1,"E","General Dyer ordered troops to fire on a crowd in Amritsar."],
+ ["The Non-Cooperation Movement was withdrawn in February 1922 after:",["The Salt March","The Chauri Chaura incident","The Gandhi–Irwin Pact","The Simon Commission"],1,"E","Gandhiji felt the movement was turning violent."],
+ ["The Simon Commission was boycotted because:",["It was too large","It had no Indian member","It favoured Indians","It was led by Gandhiji"],1,"E","Protesters greeted it with the slogan 'Go back, Simon'."],
+ ["'Purna Swaraj' was demanded at the Lahore session of the Congress in December 1929, presided over by:",["Mahatma Gandhi","Jawaharlal Nehru","Subhas Chandra Bose","Motilal Nehru"],1,"M","26 January 1930 was declared Independence Day."],
+ ["The image of Bharat Mata was first created by:",["Rabindranath Tagore","Bankim Chandra Chattopadhyay","Abanindranath Tagore","Raja Ravi Varma"],1,"M","He also wrote 'Vande Mataram'. Abanindranath Tagore later painted a famous image of Bharat Mata."]]},
+
+"History · The Making of a Global World":{ex:[
+ ["Explain the three types of movement or flows within international economic exchange (1815–1914).",["Flow of trade: mostly trade in goods such as cloth or wheat.","Flow of labour: migration of people in search of employment.","Flow of capital: movement of capital for short-term or long-term investments over long distances."]],
+ ["What was the Bretton Woods system and why was it set up?",["It was agreed at the UN Monetary and Financial Conference at Bretton Woods, USA, in July 1944.","Its main aim was to preserve economic stability and full employment in the industrial world after the war.","It set up the IMF (to deal with external surpluses and deficits) and the World Bank (to finance post-war reconstruction).","It was based on fixed exchange rates, with national currencies pegged to the dollar."]]],
+q:[
+ ["Rinderpest, which spread in Africa in the 1890s, was a disease of:",["Wheat","Cattle","Humans","Cotton"],1,"E","It killed about 90% of the cattle and destroyed African livelihoods, forcing people into wage labour."],
+ ["The Corn Laws in Britain:",["Allowed free import of corn","Restricted the import of corn","Fixed the price of bread","Banned the export of corn"],1,"E","They were later abolished under pressure from industrialists and urban dwellers."],
+ ["The Great Depression began around:",["1914","1929","1945","1960"],1,"E","It lasted until the mid-1930s."],
+ ["Indentured labourers from India were taken mainly to:",["Britain","The Caribbean, Mauritius and Fiji","Canada","Japan"],1,"M","They worked on plantations under contracts, and many could not return home."],
+ ["The 'Silk Routes' are a good example of:",["Modern industry","Pre-modern trade and cultural links between distant parts of the world","Colonial railways","Post-war aid"],1,"E","Goods, people, religions and ideas travelled along them."]]},
+
+"History · The Age of Industrialisation":{ex:[
+ ["Why did some industrialists in 19th-century Europe prefer hand labour over machines?",["In Victorian Britain there was no shortage of human labour; poor peasants and vagrants moved to cities in search of work, so wages were low.","Machines were expensive and needed large capital, and repairs were costly.","Many products in demand (seasonal goods, goods with intricate designs) needed human skill.","The upper classes preferred handmade things as a symbol of refinement and class."]],
+ ["Who were the jobbers and what was their role in Indian factories?",["Industrialists usually employed a jobber to get new recruits.","The jobber was an old and trusted worker, often from the same village as the workers.","He got people from his village, helped them settle, and provided money in times of crisis.","Over time he gained authority and power, and began demanding money and gifts for his favours."]]],
+q:[
+ ["'Proto-industrialisation' refers to:",["Large factory production","Large-scale industrial production for an international market before factories","Agriculture","Railway building"],1,"M","It was not based on factories; merchants employed peasants in the countryside."],
+ ["The first cotton mill in Bombay came up in:",["1854","1874","1917","1904"],0,"M","Two jute mills came up in Bengal soon after (1855 and 1862)."],
+ ["The spinning jenny was invented by:",["Richard Arkwright","James Hargreaves","James Watt","Matthew Boulton"],1,"E","It let one worker turn several spindles at once."],
+ ["During the First World War, Indian industries grew because:",["British goods became cheaper","Imports of Manchester goods declined and Indian mills supplied war needs","The government banned Indian goods","Railways stopped"],1,"E","New factories were set up and old ones ran multiple shifts."],
+ ["'Gomasthas' in the East India Company's system were:",["Weavers","Paid servants appointed to supervise weavers and collect supplies","Merchants from Europe","Factory owners"],1,"E","They often clashed with the weavers."]]},
+
+"History · Print Culture and the Modern World":{ex:[
+ ["Why did some people in 18th-century Europe think that print culture would bring enlightenment and end despotism?",["Print popularised the ideas of Enlightenment thinkers.","It created a new culture of dialogue and debate.","Writers like Louis-Sébastien Mercier believed the printing press was the most powerful engine of progress and that public opinion would sweep despotism away.","Books could spread ideas widely and quickly to a large reading public."]],
+ ["How did print help the spread of reformist ideas in 19th-century India?",["There were intense debates about religion; different groups offered their own interpretations through print.","Reformers like Raja Ram Mohan Roy published the Sambad Kaumudi from 1821 against practices like sati.","Orthodox groups replied in newspapers like Samachar Chandrika.","Printed tracts and newspapers reached a wider public and connected communities across regions."]]],
+q:[
+ ["The earliest kind of print technology was developed in:",["Germany","China, Japan and Korea","England","India"],1,"E","China used hand printing from about AD 594, with wooden blocks."],
+ ["The first printing press was developed by:",["Martin Luther","Johann Gutenberg","Marco Polo","William Caxton"],1,"E","Gutenberg, in Germany, in the 1430s. The first book he printed was the Bible."],
+ ["Martin Luther wrote his 'Ninety-Five Theses' to criticise:",["The monarchy","Many practices and rituals of the Roman Catholic Church","Printing","The Ottoman Empire"],1,"E","Print helped his ideas spread fast and led to the Protestant Reformation."],
+ ["The Vernacular Press Act (1878) was modelled on the:",["French Press Law","Irish Press Laws","American Constitution","Japanese law"],1,"M","It gave the government wide powers to censor reports in the vernacular press."],
+ ["The 'Diamond Sutra', the oldest Japanese book printed in 868 AD, contains:",["Six sheets of text and woodcut illustrations","Only maps","Poems by Kalidasa","Laws of the emperor"],0,"M","It shows how old the tradition of printing was in East Asia."]]},
+
+"Geography · Resources and Development":{ex:[
+ ["Why is resource planning essential in India?",["India has enormous diversity in the availability of resources: some regions are rich in some resources but poor in others.","For example, Jharkhand, Madhya Pradesh and Chhattisgarh are rich in minerals and coal, while Arunachal Pradesh has abundant water resources but lacks infrastructure.","Rajasthan is rich in solar and wind energy but lacks water.","So planning is needed at national, state, regional and local levels for balanced development."]],
+ ["What steps can be taken to control soil erosion in hilly areas?",["Contour ploughing: ploughing along the contour lines to slow down water flow.","Terrace cultivation: cutting steps on slopes to restrict erosion.","Strip cropping: growing grass strips between crops to break the force of wind.","Shelter belts: planting lines of trees to create shelter."]]],
+q:[
+ ["The first International Earth Summit was held in 1992 at:",["Kyoto","Rio de Janeiro","Paris","Geneva"],1,"E","It adopted Agenda 21 for sustainable development."],
+ ["The most widely spread soil in India, and the most important for agriculture, is:",["Black soil","Alluvial soil","Laterite soil","Arid soil"],1,"E","It covers the northern plains."],
+ ["Black soil is ideal for growing:",["Rice","Cotton","Tea","Coffee"],1,"E","It is also called regur soil and holds moisture well."],
+ ["Laterite soil develops in areas with:",["Low rainfall","High temperature and heavy rainfall","Snow cover","Desert conditions"],1,"M","Intense leaching removes nutrients; it is used for tea, coffee and cashew with manure."],
+ ["Gullies made by running water that make land unfit for cultivation are called:",["Terraces","Bad land (ravines)","Plateaus","Deltas"],1,"E","In the Chambal basin these are called ravines."]]},
+
+"Geography · Forest and Wildlife Resources":{ex:[
+ ["Describe how communities have conserved and protected forests and wildlife in India.",["In Sariska Tiger Reserve, Rajasthan, villagers fought against mining by citing the Wildlife Protection Act.","Five villages in Alwar district declared 1200 hectares as the Bhairodev Dakav 'Sonchuri' with their own rules.","The Chipko movement in the Himalayas resisted deforestation.","Farmers in Tehri (Beej Bachao Andolan) and Navdanya showed that diversified crop production is viable without synthetic chemicals.","The Joint Forest Management (JFM) programme involves local communities in restoring degraded forests."]],
+ ["Distinguish between reserved, protected and unclassed forests.",["Reserved forests: more than half of India's forest land; regarded as the most valuable for conserving forest and wildlife.","Protected forests: about one-third of the forest area, protected from further depletion.","Unclassed forests: other forests and wastelands belonging to both the government and private individuals and communities."]]],
+q:[
+ ["Project Tiger was launched in:",["1973","1986","1992","1952"],0,"E","It aimed to save the declining tiger population."],
+ ["The Chipko movement was against:",["Dam construction","Deforestation","Mining","Pollution"],1,"E","Villagers hugged trees to stop them being cut."],
+ ["Which state has the largest area under permanent (reserved) forests?",["Kerala","Madhya Pradesh","Rajasthan","Punjab"],1,"M","Madhya Pradesh has the largest area of permanent forests."],
+ ["Joint Forest Management (JFM) first started in:",["Odisha in 1988","Kerala","Assam","Punjab"],0,"M","It involves local communities in managing and restoring degraded forests."],
+ ["The Indian Wildlife (Protection) Act was enacted in:",["1972","1980","1991","1960"],0,"E","It made provisions for protecting habitats and created an all-India list of protected species."]]},
+
+"Geography · Water Resources":{ex:[
+ ["Why are multi-purpose river projects called 'temples of modern India', and why are they opposed?",["Jawaharlal Nehru called dams 'temples of modern India' because they would integrate agriculture and the village economy with rapid industrialisation and growth.","They provide irrigation, electricity, water supply, flood control, recreation and fish breeding.","But they have been opposed for displacing local communities, causing sedimentation and poor flow downstream, harming aquatic life, triggering floods, and making the soil saline.","Examples of protest: the Narmada Bachao Andolan and the Tehri Dam Andolan."]],
+ ["Describe the traditional methods of rainwater harvesting in India.",["In hill and mountain regions, people built diversion channels like the 'guls' or 'kuls' of the Western Himalayas for agriculture.","Rooftop rainwater harvesting was common in Rajasthan.","In the flood plains of Bengal, people developed inundation channels to irrigate fields.","In arid regions, agricultural fields were turned into rain-fed storage structures, like the 'khadins' in Jaisalmer and 'johads' in other parts of Rajasthan.","In Bikaner, Phalodi and Barmer, houses traditionally had underground tanks ('tankas') for drinking water."]]],
+q:[
+ ["The Hirakud dam is built on the river:",["Narmada","Mahanadi","Sutlej","Krishna"],1,"E","It is in Odisha."],
+ ["The Sardar Sarovar Dam is built on the river:",["Narmada","Tapi","Godavari","Kaveri"],0,"E","It is in Gujarat."],
+ ["Bamboo drip irrigation is practised in:",["Rajasthan","Meghalaya","Punjab","Kerala"],1,"M","Water from streams is carried through bamboo pipes, about 200 years old as a practice."],
+ ["'Tankas' are underground tanks for storing rainwater, found in:",["Kerala","Rajasthan","Assam","Bengal"],1,"E","They supply drinking water in the dry months."],
+ ["Which state has made rooftop rainwater harvesting compulsory for all houses?",["Tamil Nadu","Punjab","Bihar","Haryana"],0,"M","Tamil Nadu was the first state to do so."]]},
+
+"Geography · Agriculture":{ex:[
+ ["Describe the main features of the three cropping seasons of India.",["Rabi: sown in winter (October–December), harvested in summer (April–June); e.g. wheat, barley, peas, gram, mustard.","Kharif: sown with the onset of the monsoon, harvested in September–October; e.g. paddy, maize, jowar, bajra, cotton, jute.","Zaid: a short season between rabi and kharif in summer; e.g. watermelon, muskmelon, cucumber, fodder crops."]],
+ ["What steps have been taken by the government to ensure an increase in agricultural production?",["Land reforms such as the abolition of zamindari and consolidation of holdings.","The Green Revolution (high-yielding seeds, fertilisers) and the White Revolution (Operation Flood).","Crop insurance against drought, flood, fire and disease; Grameen banks and cooperative credit at low interest.","Kisan Credit Cards and the Personal Accident Insurance Scheme.","Announcing minimum support prices and remunerative prices for important crops."]]],
+q:[
+ ["'Slash and burn' farming in the north-east is known as:",["Jhumming","Plantation","Commercial farming","Terrace farming"],0,"E","It is called 'jhumming' in Assam, Meghalaya, Mizoram and Nagaland."],
+ ["India's main food crop is:",["Wheat","Rice","Maize","Millets"],1,"E","Rice is a kharif crop needing high temperature and over 100 cm of rain."],
+ ["Which is a rabi crop?",["Rice","Cotton","Wheat","Jute"],2,"E","Wheat is sown in winter."],
+ ["The largest producer of tea in India is:",["Kerala","Assam","Tamil Nadu","Karnataka"],1,"M","Tea grows best in deep, fertile, well-drained soil with warm, moist, frost-free climate."],
+ ["Jute is known as the:",["Golden fibre","White gold","Black gold","Silver fibre"],0,"E","West Bengal is its major producer."]]},
+
+"Geography · Minerals and Energy Resources":{ex:[
+ ["Why do we need to conserve mineral resources?",["Minerals are finite and non-renewable.","The rate of replenishment of minerals is infinitely small compared to their rate of consumption.","Continued extraction leads to increasing costs as minerals come from greater depths with decreasing quality.","So we should use them in a planned and sustainable manner: use substitutes, recycle metals, and use improved technology to allow low-grade ores to be used at low cost."]],
+ ["Why is there a pressing need to use renewable energy sources in India?",["The growing use of oil and gas makes India dependent on imports.","Fossil fuels are limited and cause serious environmental problems.","Hence there is a need to use renewable energy like solar, wind, tidal, biomass and energy from waste.","These are non-conventional energy sources and are sustainable."]]],
+q:[
+ ["The best quality coal with the highest carbon content is:",["Lignite","Peat","Anthracite","Bituminous"],2,"E","Bituminous coal is the most commonly used commercially."],
+ ["The Mumbai High is famous for:",["Coal","Petroleum","Iron ore","Manganese"],1,"E","About 63% of India's petroleum is produced there."],
+ ["The largest wind farm cluster in India is located in:",["Rajasthan","Tamil Nadu (Nagercoil to Madurai)","Gujarat","Kerala"],1,"M","Tamil Nadu has the largest wind farm cluster."],
+ ["Which is the finest iron ore with up to 70% iron?",["Hematite","Magnetite","Limonite","Siderite"],1,"M","Magnetite has excellent magnetic qualities."],
+ ["Which of these is a non-conventional source of energy?",["Coal","Petroleum","Solar energy","Natural gas"],2,"E","It is renewable."]]},
+
+"Geography · Manufacturing Industries":{ex:[
+ ["Why is manufacturing considered the backbone of development?",["It helps modernise agriculture, the backbone of our economy.","It reduces heavy dependence on agricultural income by providing jobs in secondary and tertiary sectors.","It helps eradicate unemployment and poverty, and reduces regional disparities.","Export of manufactured goods expands trade and brings in foreign exchange."]],
+ ["How can industries reduce environmental degradation?",["Minimise use of water by reusing and recycling it in two or more stages.","Harvest rainwater to meet water needs.","Treat hot water and effluents before releasing them into rivers and ponds.","Fit smoke stacks with electrostatic precipitators, fabric filters and scrubbers to reduce particulate matter.","Use machinery with silencers and redesign them to reduce noise."]]],
+q:[
+ ["The cotton textile industry is concentrated in Maharashtra and Gujarat mainly because of:",["Availability of coal","Raw cotton, market, transport and humid climate","Mountains","Cold weather"],1,"E","These factors are all close to each other."],
+ ["Which industry is called a 'basic' or 'key' industry?",["Sugar","Iron and steel","Cotton textiles","Cement"],1,"E","All other heavy, medium and light industries depend on it for machinery."],
+ ["The first successful textile mill in India was set up in Mumbai in:",["1854","1818","1947","1920"],0,"M","An earlier mill near Kolkata (1818) was not successful."],
+ ["Industries owned jointly by the state and individuals are called:",["Private sector","Public sector","Joint sector","Cooperative sector"],2,"E","Oil India Ltd. is an example."],
+ ["The 'Silicon Valley of India' is:",["Mumbai","Bengaluru","Hyderabad","Chennai"],1,"E","A major hub of the information technology industry."]]},
+
+"Geography · Lifelines of National Economy":{ex:[
+ ["Why are means of transport and communication called the lifelines of a nation?",["They link the areas of production with areas of consumption.","They help in the supply of raw materials and the movement of finished goods.","They help in trade, both national and international.","They bring people closer and help in the development of the economy."]],
+ ["What are the advantages of pipeline transport?",["It can carry liquids and gases (crude oil, petroleum products, natural gas) over long distances.","Initial cost of laying is high, but running costs are low.","It rules out transhipment losses or delays.","It has helped locate refineries and fertiliser plants away from the source, e.g. the Hazira–Vijaipur–Jagdishpur (HVJ) pipeline."]]],
+q:[
+ ["The Golden Quadrilateral links:",["Delhi–Mumbai–Chennai–Kolkata","Srinagar–Kanyakumari","Silchar–Porbandar","Delhi–Lucknow"],0,"E","It is a 6-lane super highway project."],
+ ["The North–South corridor links:",["Srinagar and Kanyakumari","Silchar and Porbandar","Delhi and Kolkata","Mumbai and Chennai"],0,"E","The East–West corridor links Silchar and Porbandar."],
+ ["Which is the deepest, landlocked and well-protected port of India?",["Kolkata","Visakhapatnam","Mumbai","Chennai"],1,"M","It is on the east coast, in Andhra Pradesh."],
+ ["Kandla port (Deendayal Port) in Kutch was developed to:",["Replace Chennai","Ease the volume of trade on Mumbai port after Partition","Export tea","Serve the Andaman Islands"],1,"M","It was built after the loss of Karachi port in 1947."],
+ ["National Waterway No. 1 lies on the river:",["Brahmaputra","Ganga (Haldia to Prayagraj)","Godavari","Narmada"],1,"E","It is 1620 km long."]]},
+
+"Civics · Power Sharing":{ex:[
+ ["Explain how Belgium accommodated its ethnic diversity.",["The Constitution says the number of Dutch- and French-speaking ministers in the central government shall be equal.","Many powers of the central government have been given to state governments of the two regions.","Brussels has a separate government in which both communities have equal representation.","A third kind of government, the 'community government', is elected by people of one language community and handles cultural, educational and language issues."]],
+ ["Give the two sets of reasons (prudential and moral) in favour of power sharing.",["Prudential: power sharing reduces the possibility of conflict between social groups and ensures political stability.","Moral: power sharing is the very spirit of democracy; people affected by policies should have a say in how they are governed.","It gives legitimacy to the political order."]]],
+q:[
+ ["In Sri Lanka, the Act of 1956 recognised which language as the only official language?",["Tamil","Sinhala","English","Hindi"],1,"E","This was one of several majoritarian measures."],
+ ["Power sharing among different organs of government (legislature, executive, judiciary) is called:",["Federal division","Horizontal distribution of power","Vertical division","Community government"],1,"M","It allows each organ to check the others."],
+ ["Division of power between central, state and local governments is called:",["Horizontal distribution","Vertical division of power","Coalition","Checks and balances"],1,"E","India has this division."],
+ ["Belgium's capital Brussels has:",["Only a French government","A separate government with equal representation of both communities","No government","A Dutch-majority government"],1,"E","This kept peace between the communities."],
+ ["The idea of 'majoritarianism' in Sri Lanka led to:",["Peace","Civil war and distrust between communities","Economic growth","More power sharing"],1,"E","Tamils felt alienated, leading to a long conflict."]]},
+
+"Civics · Federalism":{ex:[
+ ["What are the key features of federalism?",["There are two or more levels (tiers) of government.","Each tier governs the same citizens, but has its own jurisdiction in specific matters.","The jurisdictions are specified in the Constitution, and fundamental provisions cannot be changed by one level alone.","Courts can interpret the Constitution and the powers of different levels.","Sources of revenue for each level are clearly specified to ensure financial autonomy."]],
+ ["What was the 1992 Constitutional amendment for decentralisation in India?",["It made the third tier of democracy more powerful and effective.","Regular elections to local government bodies became mandatory.","Seats are reserved for SCs, STs and OBCs, and at least one-third of all positions are reserved for women.","A State Election Commission conducts the elections.","States must share some powers and revenue with local bodies."]]],
+q:[
+ ["Subjects like defence, foreign affairs and banking are in the:",["State List","Union List","Concurrent List","Residuary List"],1,"E","Only Parliament can make laws on them."],
+ ["Education, forests and marriage are in the:",["Union List","State List","Concurrent List","None"],2,"M","Both Union and State can legislate; Union law prevails in a conflict."],
+ ["India is an example of:",["'Coming together' federation","'Holding together' federation","Unitary state","Confederation"],1,"M","Power is shared between a strong centre and states to hold the country together."],
+ ["The head of a municipal corporation is the:",["Sarpanch","Mayor","Collector","Governor"],1,"E","A Sarpanch heads a gram panchayat."],
+ ["Subjects not in any of the three lists (like computer software) come under:",["State governments","Residuary powers of the Union","Local bodies","Courts"],1,"E","The Union government legislates on them."]]},
+
+"Civics · Gender, Religion and Caste":{ex:[
+ ["What is meant by 'communalism' and what forms can it take in politics?",["Communalism is when beliefs of one religion are presented as superior, or when a religious group's demands are formed in opposition to another's, and state power is used to establish domination.","It can appear in everyday beliefs: religious prejudices, stereotypes and belief in the superiority of one's religion.","It can seek political dominance of one's own religious community.","Political mobilisation on religious lines, using sacred symbols and emotional appeals.","At its worst it leads to communal violence, riots and massacre."]],
+ ["What is a secular state? How does India's Constitution make it secular?",["There is no official religion for the Indian state.","The Constitution gives individuals and communities freedom to profess, practise and propagate any religion.","It prohibits discrimination on grounds of religion.","It allows the state to intervene in religious matters to ensure equality within religious communities (e.g. banning untouchability)."]]],
+q:[
+ ["A person who believes in equal rights and opportunities for women and men is a:",["Communalist","Feminist","Casteist","Secularist"],1,"E","Feminist movements fought for women's rights."],
+ ["In India, at least one-third of seats in local government bodies are reserved for:",["Youth","Women","Farmers","Industrialists"],1,"E","This was done by the 1992 amendment."],
+ ["The 'sexual division of labour' means:",["Equal sharing of all work","Work inside the home done mainly by women, outside work by men","Only men work","Only women work"],1,"E","It is a social belief, not a biological rule."],
+ ["Which Constitutional provision makes India secular?",["An official state religion","No official religion and freedom to practise any religion","Only Hindu festivals allowed","Ban on all religion"],1,"E","India follows the principle of equal respect for all religions."],
+ ["Caste can take various forms in politics. Which is NOT one of them?",["Choosing candidates by caste composition","Political parties appealing to caste sentiment","Universal adult franchise helping caste groups get recognition","Caste being the only factor that decides elections"],3,"M","No party wins votes of all voters of one caste, and many factors decide elections."]]},
+
+"Civics · Political Parties":{ex:[
+ ["What are the main functions of a political party?",["They contest elections and put up candidates.","They put forward different policies and programmes for voters to choose from.","They play a decisive role in making laws for the country.","They form and run governments.","Parties that lose elections play the role of the opposition.","They shape public opinion and give people access to government machinery and welfare schemes."]],
+ ["What challenges do political parties face in India?",["Lack of internal democracy: power concentrates in one or a few leaders.","Dynastic succession: top positions go to family members.","Growing role of money and muscle power, especially during elections.","Parties often do not offer meaningful choice to voters, as their ideologies become similar."]]],
+q:[
+ ["A system where only one party is allowed to control and run the government is:",["One-party system","Two-party system","Multi-party system","Coalition"],0,"E","China is an example."],
+ ["A party that gets at least 6% of the votes in Lok Sabha or Assembly elections in four states and wins at least four Lok Sabha seats is recognised as a:",["State party","National party","Regional party","Unrecognised party"],1,"M","The Election Commission sets the conditions for recognition."],
+ ["India has a:",["One-party system","Two-party system","Multi-party system","No-party system"],2,"E","Many parties compete, and coalitions often form governments."],
+ ["The Election Commission's order that every party must hold organisational elections and file income tax returns is an attempt to reform:",["The judiciary","Political parties","Local bodies","Foreign policy"],1,"E","Other reforms include the anti-defection law and affidavits on candidates' property and criminal cases."],
+ ["The anti-defection law was introduced to stop:",["Elections","Elected representatives changing parties for personal gain","Voting by women","Party funding"],1,"E","A member who changes party loses their seat."]]},
+
+"Civics · Outcomes of Democracy":{ex:[
+ ["How is a democratic government an accountable, responsive and legitimate government?",["Accountable: citizens can examine the decision-making process through transparency and the right to information.","Responsive: it attends to people's needs and expectations through regular, free and fair elections and open public debate.","Legitimate: it is the people's own government; people prefer democracy over dictatorship around the world.","It may be slow, but it makes more acceptable decisions."]],
+ ["How does democracy accommodate social diversity?",["Democracy develops procedures to handle social differences, divisions and conflicts.","It ensures that majority and minority are not fixed; the majority works with the minority.","Rule by majority does not mean rule by a single religious, racial or linguistic group.","Every citizen should have a chance of being in the majority at some point."]]],
+q:[
+ ["Democracies are better than other forms of government because they:",["Always give fast economic growth","Promote equality and enhance the dignity of the individual","Never have disputes","Remove all poverty"],1,"E","Dignity and freedom of the individual are central to democracy."],
+ ["Which of these is the best evidence of accountability in a democracy?",["Long speeches by leaders","Regular, free and fair elections and right to information","A strong army","High economic growth"],1,"E","Citizens can examine and change the government."],
+ ["Economic inequality in democracies:",["Has disappeared","Still exists and often grows","Is illegal","Is lower than in all dictatorships"],1,"M","Democracies have not fully reduced inequality and poverty."],
+ ["Democracy is a 'legitimate' government because:",["It is old","It is the people's own government","It is chosen by the army","It is chosen by kings"],1,"E","People wish to be ruled by their own elected representatives."],
+ ["The dignity of women in democracies has improved mainly through:",["Laws alone","Long struggles and recognition that women are equal to men","Rule by kings","Avoiding elections"],1,"E","Democracy gives them a legal and moral basis to fight discrimination."]]},
+
+"Economics · Development":{ex:[
+ ["Why do different persons have different, as well as conflicting, notions of development? Give examples.",["People come from different situations, so their needs and aspirations differ.","A landless rural labourer wants more days of work and better wages, but a rich farmer wants high support prices for crops.","An industrialist may want more electricity from a dam, but people living there may lose their land and livelihood.","What is development for one may even be destructive for another."]],
+ ["Why is per capita income not a complete indicator of development?",["It is an average; it hides disparities between people.","It does not tell us about non-income factors like health, education, security, equality and environment.","For example, Kerala has lower per capita income than some states but better infant mortality, literacy and school attendance.","So the UNDP's Human Development Index also uses health and education."]]],
+q:[
+ ["The World Bank uses which criterion to classify countries?",["Literacy","Per capita (average) income","Life expectancy","Population"],1,"E","Average income = total income ÷ total population."],
+ ["The Human Development Report is published by the:",["World Bank","UNDP","IMF","WHO"],1,"E","It compares countries on income, health and education."],
+ ["Infant Mortality Rate is the number of children who die before age one per:",["100 live births","1000 live births","10 000 births","1 lakh people"],1,"E","It is a key health indicator."],
+ ["Sustainable development means:",["Development using all resources now","Development that meets present needs without harming future generations","Only industrial growth","No development"],1,"E","Resources like groundwater must be used carefully."],
+ ["Body Mass Index (BMI) is used to check:",["Literacy","Undernourishment","Income","Life expectancy"],1,"M","Weight in kg ÷ (height in m)². Below 18.5 suggests undernourishment."]]},
+
+"Economics · Sectors of the Indian Economy":{ex:[
+ ["How is the tertiary sector different from the other sectors?",["Primary: producing goods by exploiting natural resources (agriculture, fishing, mining).","Secondary: natural products are changed into other forms through manufacturing.","Tertiary: activities that do not produce goods themselves but support the other sectors, such as transport, storage, communication, banking and trade (the service sector).","Since the 1970s, the tertiary sector has become the largest producing sector in India."]],
+ ["Distinguish between organised and unorganised sectors.",["Organised: registered enterprises with regular terms of employment, following rules like the Factories Act and Minimum Wages Act; workers get job security, paid leave, provident fund and medical benefits.","Unorganised: small, scattered units largely outside government control; jobs are low-paid, irregular, with no paid leave or job security.","Many workers in the unorganised sector need protection and support."]]],
+q:[
+ ["Agriculture, fishing and mining belong to the:",["Primary sector","Secondary sector","Tertiary sector","Quaternary sector"],0,"E","They use natural resources directly."],
+ ["GDP is the value of:",["All goods produced","All final goods and services produced within a country in a year","All intermediate goods","Exports only"],1,"M","Only final goods are counted to avoid double counting."],
+ ["Disguised unemployment means:",["No one is working","More people are working than needed, so some contribute nothing","Seasonal work","Working abroad"],1,"E","Common in agriculture; removing some workers does not reduce output."],
+ ["MGNREGA 2005 guarantees employment of:",["50 days","100 days","200 days","365 days"],1,"E","For rural households; if work is not provided, an unemployment allowance is given."],
+ ["Railways and the Indian Postal service are examples of:",["Private sector","Public sector","Unorganised sector","Primary sector"],1,"E","The government owns most of their assets."]]},
+
+"Economics · Money and Credit":{ex:[
+ ["How does money solve the problem of double coincidence of wants?",["In barter, both parties must want what the other has: a double coincidence of wants.","Money acts as a medium of exchange: a person can sell goods for money and use the money to buy what they need.","This removes the need for each side to want exactly what the other offers."]],
+ ["Why should banks and cooperatives increase lending facilities in rural areas?",["Rural households depend largely on informal sources like moneylenders, who charge very high interest.","High interest leaves borrowers worse off; they may fall into a debt trap.","Cheap and affordable formal credit helps people grow crops, do business and set up small industries.","This helps the country's development."]]],
+q:[
+ ["Modern forms of money include:",["Gold coins only","Currency notes, coins and bank deposits","Grain","Cattle"],1,"E","They are accepted as a medium of exchange because they are authorised by the government."],
+ ["In India, currency notes are issued by the:",["State Bank of India","Reserve Bank of India","Ministry of Finance","World Bank"],1,"E","RBI also supervises how banks lend."],
+ ["Collateral is:",["Interest on a loan","An asset the borrower owns and uses as a guarantee to the lender","A type of bank","A cheque"],1,"E","Examples: land, building, vehicle, livestock, bank deposits."],
+ ["Self Help Groups (SHGs) usually have:",["2–3 members","15–20 members, mostly women","500 members","Only men"],1,"E","Members pool savings and give small loans to each other."],
+ ["The Grameen Bank of Bangladesh was started by:",["Amartya Sen","Muhammad Yunus","Manmohan Singh","Raghuram Rajan"],1,"M","He received the Nobel Peace Prize in 2006."]]},
+
+"Economics · Globalisation and the Indian Economy":{ex:[
+ ["What is globalisation and what factors have enabled it?",["Globalisation is the rapid integration of countries through more foreign trade and foreign investment by MNCs.","Technology: rapid improvement in transport, information and communication technology.","Liberalisation: removal of trade barriers and restrictions set by the government.","The World Trade Organisation (WTO) pushed for more liberal international trade."]],
+ ["What is 'fair globalisation'?",["Globalisation that creates opportunities for all and ensures its benefits are better shared.","Government policies must protect the interests of the poor and small producers, not only of the rich.","Ensure labour laws are properly implemented and workers get their rights.","Support small producers until they become strong enough to compete; use trade barriers when needed."]]],
+q:[
+ ["An MNC is a company that:",["Works in only one city","Owns or controls production in more than one nation","Is always government-owned","Only exports raw materials"],1,"E","It sets up production where costs are low and markets are near."],
+ ["Removing barriers or restrictions set by the government is called:",["Privatisation","Liberalisation","Nationalisation","Taxation"],1,"E","India began major liberalisation in 1991."],
+ ["The WTO was set up to:",["Give loans","Liberalise international trade","Fix currency rates","Control population"],1,"E","Its aim is free trade, though developed countries are seen as benefiting more."],
+ ["Ford Motors set up its plant in India near Chennai in collaboration with:",["Tata","Mahindra and Mahindra","Maruti","Bajaj"],1,"M","It started in 1995 and later exported cars and parts."],
+ ["A tax on imports is an example of a:",["Trade barrier","Subsidy","Loan","Investment"],0,"E","It restricts foreign trade."]]},
+
+"Economics · Consumer Rights":{ex:[
+ ["Why are rules and regulations needed in the marketplace to protect consumers?",["Individual consumers often find themselves in a weak position: sellers may under-weigh, overcharge, sell adulterated or defective goods.","Large companies with money and power can manipulate the market by giving incorrect information.","False claims about quality and safety can cause harm.","So laws like the Consumer Protection Act are needed to protect consumers' interests."]],
+ ["Describe the rights of consumers under the Consumer Protection Act.",["Right to safety: against goods and services hazardous to life and property.","Right to be informed: about ingredients, price, date of manufacture, expiry, address of manufacturer.","Right to choose: no compulsion to buy unwanted goods with a service.","Right to seek redressal: against unfair trade practices and exploitation.","Right to represent in consumer courts, and right to consumer education."]]],
+q:[
+ ["The Consumer Protection Act (COPRA) was first enacted in India in:",["1986","1991","2005","1976"],0,"E","It was later replaced by a new Act in 2019."],
+ ["The certification mark for agricultural products is:",["ISI","Agmark","Hallmark","ISO"],1,"E","ISI is for industrial products; Hallmark is for gold jewellery."],
+ ["National Consumers' Day in India is observed on:",["15 March","24 December","26 January","5 June"],1,"M","The date COPRA was enacted in 1986. World Consumer Rights Day is 15 March."],
+ ["The Right to Information Act was passed in:",["2005","1986","1991","2010"],0,"E","It lets citizens get information about government functioning."],
+ ["The ISI mark is a standard certification mark for:",["Gold jewellery","Industrial products","Agricultural products","Medicines only"],1,"E","It is given by the Bureau of Indian Standards (BIS)."]]}
+});
+
+NC("10","English",{
+"A Letter to God":{ex:[
+ ["What did Lencho hope for, and why did his hopes turn to sorrow?",["Lencho hoped for rain because his field of ripe corn needed it for a good harvest.","Rain did come, but it was soon followed by a hailstorm.","The hail destroyed the whole crop, leaving the family with nothing to eat that year."]],
+ ["Who read Lencho's letter, and what did the postmaster do? Why was Lencho angry when he got the money?",["The postmaster read the letter and was moved by Lencho's faith in God.","He did not want to shake that faith, so he collected money from his staff and friends and sent it, signed 'God'.","They could collect only a little over half of the 100 pesos asked for.","Lencho believed God could not make a mistake, so he thought the post office employees had stolen the rest and called them 'a bunch of crooks'."]]],
+q:[
+ ["The raindrops were compared by Lencho to:",["Pearls","New coins","Diamonds","Silver"],1,"E","Big drops were 'ten cent pieces' and small ones 'fives'."],
+ ["Lencho asked God for:",["50 pesos","100 pesos","70 pesos","200 pesos"],1,"E","He needed money to sow his field again and to live until the crop came."],
+ ["The hailstorm left the field looking as if it were covered with:",["Water","Salt","Ash","Sand"],1,"M","The valley was covered in white hailstones."],
+ ["The irony in the story is that:",["Lencho got no money","The people who helped him were called crooks by him","God answered the letter","The postmaster was dishonest"],1,"M","The men who sacrificed to help him are the ones he blames."],
+ ["Lencho's letter shows his:",["Anger","Unshakeable faith in God","Greed","Fear of the postmaster"],1,"E","He had no doubt God would help."]]},
+
+"Nelson Mandela: Long Walk to Freedom":{ex:[
+ ["What does Mandela mean by 'twin obligations'?",["Every man has two obligations: to his family, parents, wife and children; and to his people, community and country.","In a free, civil society, a man can fulfil both.","Under apartheid, a coloured man who tried to fulfil his duty to his people was punished and taken away from his family."]],
+ ["What does courage mean to Mandela?",["Courage is not the absence of fear but the triumph over it.","The brave man is not he who does not feel afraid, but he who conquers that fear.","He learnt this from the comrades who risked everything for the freedom struggle."]]],
+q:[
+ ["Nelson Mandela was sworn in as the first Black President of South Africa on:",["10 May 1994","26 January 1950","1 January 1990","10 May 1990"],0,"E","The ceremony took place at the Union Buildings in Pretoria."],
+ ["Mandela says that the 'greatest wealth' of South Africa is its:",["Gold mines","People","Diamonds","Land"],1,"E","He calls them finer and truer than the purest diamonds."],
+ ["'Apartheid' refers to:",["A political party","Racial discrimination and segregation","A freedom movement","A kind of prayer"],1,"E","A policy that separated people by race."],
+ ["Mandela says that no one is born hating another person because of the colour of their skin; people must:",["Fight","Learn to hate, and so can be taught to love","Stay apart","Avoid politics"],1,"M","'Love comes more naturally to the human heart than its opposite.'"],
+ ["The 'oppressor and the oppressed' are both, in Mandela's view:",["Free","Robbed of their humanity","Equal","Happy"],1,"M","The oppressor is a prisoner of hatred too."]]},
+
+"Two Stories about Flying":{ex:[
+ ["(His First Flight) Why was the young seagull afraid to fly? What finally made him fly?",["He was afraid his wings would not support him when he looked at the vast sea below.","His family scolded and ignored him and even threatened to let him starve.","His mother flew near him with a piece of fish but stopped just short.","Maddened by hunger, he dived at the fish, fell outwards, and spread his wings in fear. He flew."]],
+ ["(The Black Aeroplane) Why was the pilot's mystery never solved?",["Flying through a storm, the pilot's instruments failed and he was nearly out of fuel.","A black aeroplane appeared and guided him safely to an airport.","When he landed, the controller said no other plane had been seen on radar that night.","The identity of the other pilot remained a mystery."]]],
+q:[
+ ["The young seagull's family was on a ledge:",["By a river","On a cliff above the sea","In a forest","On a ship"],1,"E","He was alone after the others had flown."],
+ ["The seagull finally flew because he was:",["Ordered by his father","Maddened by hunger","Pushed by his brother","Attacked by another bird"],1,"E","He dived for the fish his mother held."],
+ ["In 'The Black Aeroplane', the pilot was flying a:",["Dakota","Boeing","Jet","Helicopter"],0,"E","An old Dakota aeroplane, from Paris to England."],
+ ["The pilot decided to fly into the storm because:",["He was ordered to","He wanted to reach home in time for breakfast","He had no fuel","He liked storms"],1,"M","He took the risk, and it nearly cost his life."],
+ ["The mood of 'The Black Aeroplane' is mainly one of:",["Comedy","Mystery","Romance","Anger"],1,"E","The rescuer is never identified."]]},
+
+"From the Diary of Anne Frank":{ex:[
+ ["Why does Anne say that 'paper has more patience than people'?",["She was feeling low and listless one day and did not know whether to go out or stay in.","She thought of this saying while wondering whether to start a diary.","She had no true friend to confide in, so she decided to treat her diary as a friend, named Kitty."]],
+ ["How did Anne deal with Mr Keesing's punishments for talking in class?",["First essay: 'A Chatterbox'. She argued talking was a student's trait, inherited from her mother.","Second: 'An Incorrigible Chatterbox'. She again wrote convincingly.","Third: she wrote a poem about a mother duck, a father swan and three ducklings bitten to death for quacking too much.","Mr Keesing took the joke the right way, and from then on he let her talk."]]],
+q:[
+ ["Anne named her diary:",["Margot","Kitty","Sanne","Jopie"],1,"E","She treated it as her friend."],
+ ["Anne got the diary on her:",["12th birthday","13th birthday","15th birthday","14th birthday"],1,"E","It was one of her birthday presents."],
+ ["Mr Keesing was Anne's:",["Father","Maths teacher","Friend","Neighbour"],1,"E","An old 'fogey' who taught maths."],
+ ["Anne says she had no 'real friend', even though she had:",["No family","Many relatives and friends","No one to talk to at all","Only teachers"],1,"M","She had loving parents and 30 people she could call friends, but no one to share her deepest feelings with."],
+ ["The family went into hiding to escape:",["A flood","Nazi persecution of Jews","A war in Africa","A disease"],1,"E","Anne was a Jewish girl in Amsterdam during the Second World War."]]},
+
+"Glimpses of India":{ex:[
+ ["(A Baker from Goa) What is the importance of the baker (pader) in Goan life?",["Bread is part of every important occasion: marriage gifts (sweet bread called bol), cakes and bolinhas at Christmas and festivals.","The mother of the house makes sandwiches for her daughter's engagement.","So bakers remain important in a village, even though the Portuguese have left."]],
+ ["(Tea from Assam) What legends are told about the discovery of tea?",["Chinese legend: Emperor Shen Nung found that a few leaves had fallen into his boiling water, giving a delicious flavour.","Indian legend: Bodhidharma, a Buddhist monk, cut off his eyelids because he felt sleepy during meditation. Ten tea plants grew from them, and their leaves banished sleep."]]],
+q:[
+ ["Coorg is located in:",["Kerala","Karnataka","Tamil Nadu","Goa"],1,"E","The smallest district of Karnataka."],
+ ["Besides their hospitality, the people of Coorg (Kodavus) are best known for their:",["Trading skill","Martial traditions","Weaving","Pottery"],1,"M","The Coorg Regiment is one of the most decorated in the Indian Army."],
+ ["In 'A Baker from Goa', the baker's wooden staff makes a 'jhang, jhang' sound to announce:",["His arrival","A festival","Rain","School time"],0,"E","Children ran to meet him in the morning."],
+ ["Rajvir and Pranjol were travelling to:",["Coorg","Assam","Goa","Darjeeling"],1,"E","Pranjol's father managed a tea estate in Upper Assam."],
+ ["The first tea in India was grown in:",["Kerala","Assam","Goa","Coorg"],1,"M","Assam has the largest concentration of tea plantations."]]},
+
+"Mijbil the Otter":{ex:[
+ ["Why did Maxwell take Mijbil with him, and how did he carry him on the flight to London?",["After his dog died, Maxwell wanted an otter as a pet, and a friend got one for him in Iraq.","British airlines would not fly animals, so he booked a flight to Paris, then London.","The airline insisted that Mij travel in a box at Maxwell's feet. Mij tore the lining in panic and the box was opened in the cabin."]],
+ ["What 'game' did Mij invent?",["He played with a rubber ball in the bath and later invented a game with a ping-pong ball.","He placed the ball on the slope of a tilted suitcase and chased it as it rolled down.","He played for hours, showing his playful and intelligent nature."]]],
+q:[
+ ["Mij belonged to a species unknown to science until then, so it was named:",["Maxwell's otter","The Basra otter","The Tigris otter","The London otter"],0,"M","Zoologists named the new race after Gavin Maxwell."],
+ ["Mij loved:",["Sleeping only","Playing with water","Eating fruit","Being in a cage"],1,"E","He made water 'bubble and splash' and loved baths."],
+ ["Maxwell first got Mij in:",["London","Basra, Iraq","Paris","Egypt"],1,"E","He was in southern Iraq."],
+ ["On the flight, Mij was carried in a:",["Basket","Box","Bag","Cage"],1,"E","The airline required it."],
+ ["Londoners who saw Mij on walks guessed he was all sorts of animals EXCEPT:",["A baby seal","A squirrel","A walrus","An otter"],3,"M","Very few people knew what he really was."]]},
+
+"Madam Rides the Bus":{ex:[
+ ["How did Valli plan her bus ride and save money for it?",["She listened carefully to conversations about the bus journey and asked a few discreet questions.","She found that the town was six miles away, the fare was thirty paise one way, and the trip took 45 minutes.","She saved money by resisting the temptation to buy peppermints, toys or rides at the fair."]],
+ ["Why did Valli not want to get off the bus at the town, and why did she refuse a drink?",["She did not want to spend the extra money and return late.","She refused the conductor's offer of a cool drink because she had only enough for the fare; she wanted to stay independent and grown-up.","She returned home on the same bus."]]],
+q:[
+ ["Valli was:",["Six years old","Eight years old","Ten years old","Twelve years old"],1,"E","An eight-year-old girl who longed to ride the bus."],
+ ["How much did Valli spend in all on her trip?",["30 paise","60 paise","50 paise","1 rupee"],1,"E","Thirty paise each way."],
+ ["On her way back, Valli was saddened by seeing:",["A broken bus","A dead cow","A beggar","Her mother"],1,"M","The young cow that had run in front of the bus earlier was lying dead by the road."],
+ ["The conductor called Valli:",["Little girl","Madam","Baby","Child"],1,"E","He was amused by her grown-up manner."],
+ ["The story's theme is:",["Fear of travel","A child's curiosity and first encounter with death","Greed","Friendship between bus drivers"],1,"M","Valli experiences joy and then the sadness of death."]]},
+
+"The Sermon at Benares":{ex:[
+ ["Why did Kisa Gotami go from house to house, and what did she learn?",["Her only son had died, and she carried his body asking for medicine to cure him.","The Buddha asked her to bring a handful of mustard seed from a house where no one had lost a child, husband, parent or friend.","She found no such house.","She understood that death is common to all and that grief for one's own loss is selfish."]],
+ ["What lesson does the Buddha teach in the sermon?",["Life in this world is troubled, brief and combined with pain.","All who are born must die; neither the young nor the old, the foolish nor the wise, can escape it.","Weeping and grief do not bring back the dead; they only add pain and harm the body.","One who has overcome sorrow will be free of sorrow and blessed."]]],
+q:[
+ ["Gautama Buddha's original name was:",["Siddhartha Gautama","Ananda","Mahavira","Ashoka"],0,"E","He was a prince born in North India."],
+ ["The Buddha gave his first sermon at:",["Bodh Gaya","Benares (Sarnath)","Kapilavastu","Lumbini"],1,"E","He became enlightened under the Bodhi tree at Bodh Gaya, then preached at Benares."],
+ ["Kisa Gotami was asked to bring:",["Water","A handful of mustard seed","Flowers","Rice"],1,"E","From a house that had never known death."],
+ ["The lesson Kisa Gotami learnt was that:",["Her son would come back","Death is common to all","Mustard seeds cure illness","Monks are magical"],1,"E","Grief is part of life for everyone."],
+ ["Siddhartha left his palace at the age of:",["12","25","40","18"],1,"M","He had seen a sick man, an old man, a funeral and a monk."]]},
+
+"The Proposal":{ex:[
+ ["What does Lomov come to ask, and why does he not manage it at once?",["He came to propose marriage to Chubukov's daughter, Natalya.","Before he could make the proposal, he and Natalya quarrelled over who owned the Oxen Meadows.","Later they quarrelled again about whose dog, Guess or Squeezer, was better."]],
+ ["What does the play show about marriage among landowning families in 19th-century Russia?",["Marriages were often based on property and wealth rather than love.","Chubukov is happy because Lomov is wealthy and a good match; Natalya is older and needs to marry.","The constant quarrelling shows the humour and the lack of real affection."]]],
+q:[
+ ["'The Proposal' was written by:",["Leo Tolstoy","Anton Chekhov","Shakespeare","Ibsen"],1,"E","A one-act farce."],
+ ["Lomov and Natalya first quarrel about:",["Dogs","The Oxen Meadows","Money","Horses"],1,"E","Each claims the meadows belong to their family."],
+ ["Lomov's dog is called:",["Squeezer","Guess","Tommy","Bruno"],1,"M","Natalya's family dog is Squeezer."],
+ ["Lomov suffers from:",["Fever","Palpitations and nervousness","Blindness","A broken leg"],1,"E","He keeps complaining of his heart."],
+ ["The play is best described as:",["A tragedy","A farce","A historical drama","A thriller"],1,"E","It uses exaggerated, absurd situations for humour."]]},
+
+"First Flight Poems":{ex:[
+ ["('Dust of Snow' by Robert Frost) How did a small event change the poet's mood?",["A crow perched on a hemlock tree shook down dust of snow on the poet.","This small event changed his mood: it saved a part of a day he had regretted.","The poem shows that small things in nature can change a dark mood to a happy one."]],
+ ["('Fire and Ice' by Robert Frost) What do 'fire' and 'ice' stand for?",["Fire stands for desire (greed, lust, conflict).","Ice stands for hatred (coldness, indifference, rigidity).","The poet says either can destroy the world."]],
+ ["('A Tiger in the Zoo' by Leslie Norris) Contrast the tiger in the zoo with the tiger in the wild.",["In the zoo: he stalks the length of his small cage, quiet, ignoring visitors, staring at the stars.","In the wild: he would lurk in long grass near a water hole, waiting for deer, and snarl near villages.","The poem shows the cruelty of keeping wild animals in captivity."]]],
+q:[
+ ["In 'Dust of Snow', the crow and the hemlock tree are usually seen as symbols of:",["Joy","Gloom and sorrow","Love","Wealth"],1,"M","Yet from them comes something that cheers the poet."],
+ ["'Fire and Ice' was written by:",["John Keats","Robert Frost","Leslie Norris","Ogden Nash"],1,"E","An American poet."],
+ ["In 'The Ball Poem', the boy learns about:",["How to play","The epistemology of loss","Buying toys","Football"],1,"M","He learns to bear loss and grow up."],
+ ["'How to Tell Wild Animals' is a poem full of:",["Sad tones","Humour","Anger","Prayer"],1,"E","Carolyn Wells uses wordplay to describe dangerous animals."],
+ ["In 'Amanda!', the girl imagines herself as a:",["Princess","Mermaid","Bird","Teacher"],1,"E","She escapes her nagging mother in her dreams."]]},
+
+"Footprints without Feet (Supplementary)":{ex:[
+ ["('A Triumph of Surgery') Why was Tricki taken to Mr Herriot?",["Mrs Pumphrey overfed and pampered her dog Tricki, giving him extra snacks.","He became fat and ill, and Mrs Pumphrey was worried.","Mr Herriot took him to his surgery, gave him only water and exercise, and he recovered in two weeks."]],
+ ["('Footprints without Feet') How did Griffin become invisible, and what happened then?",["Griffin, a brilliant scientist, swallowed a rare drug that made him invisible.","He became a lawless person: he set fire to his landlord's house, stole clothes from a London store, and robbed a clergyman.","At Iping he became the subject of rumours and was finally caught."]]],
+q:[
+ ["In 'A Triumph of Surgery', Tricki was:",["A cat","A dog","A horse","A parrot"],1,"E","He belonged to Mrs Pumphrey."],
+ ["Griffin made himself invisible by:",["Wearing a cloak","Swallowing a rare drug","Magic","Paint"],1,"E","In H. G. Wells's story."],
+ ["'The Thief's Story' is about a young thief, Hari Singh, and a man named:",["Anil","Ravi","Rahul","Amit"],0,"E","Anil's trust changes Hari Singh."],
+ ["In 'The Midnight Visitor', Ausable is a:",["Detective","Secret agent","Thief","Teacher"],1,"E","He outwits Max with a clever story about a balcony."],
+ ["'Bholi' tells the story of a girl who gains confidence through:",["Money","Education","Marriage","Magic"],1,"E","Her teacher helps her speak without stammering."]]},
+
+"Grammar":{ex:[
+ ["Change into reported speech: He said, \"I am going to the market.\"",["The reporting verb is in the past tense, so the tense moves back: 'am going' → 'was going'.","'I' becomes 'he'.","Answer: He said that he was going to the market."]],
+ ["Change into the passive voice: The teacher praised the students.",["Object 'the students' becomes the subject.","Past simple active → was/were + past participle.","Answer: The students were praised by the teacher."]],
+ ["Fill in with the correct form of the verb: Neither the teacher nor the students ___ (be) present.",["With 'neither…nor', the verb agrees with the subject closest to it.","'students' is plural.","Answer: Neither the teacher nor the students were present."]]],
+q:[
+ ["Choose the correct form: She ___ to school every day.",["go","goes","going","gone"],1,"E","Third person singular in the present simple takes -s/-es."],
+ ["Reported speech of: She said, \"I will come tomorrow.\"",["She said that she will come tomorrow.","She said that she would come the next day.","She said she comes tomorrow.","She said that I would come tomorrow."],1,"M","'will' → 'would', 'tomorrow' → 'the next day'."],
+ ["Passive voice of: They are building a bridge.",["A bridge is built by them.","A bridge is being built by them.","A bridge was being built by them.","A bridge has been built by them."],1,"M","Present continuous passive: is/are being + past participle."],
+ ["Choose the correct modal: You ___ wear a helmet while riding (it is the law).",["might","must","could","would"],1,"E","'Must' shows obligation."],
+ ["Choose the correct determiner: There is ___ milk left in the jug.",["a few","a little","many","few"],1,"E","'Little' is used with uncountable nouns like milk."]]}
+});
+
+(function applyNcert(){
+  const T = {"12": [BANK, NOTES], "10": [BANK10, NOTES10]}, DF = {E: "Easy", M: "Medium", H: "Hard"};
+  Object.entries(NCERT_DATA).forEach(([cls, subs]) => { const [B, N] = T[cls];
+    Object.entries(subs).forEach(([s, chs]) => Object.entries(chs).forEach(([c, d]) => {
+      if(!B[s] || !B[s].chapters[c]){ console.warn("NCERT_DATA: unknown chapter", cls, s, c); return; }
+      if(d.ex && d.ex.length){
+        const sec = ["NCERT solved examples", d.ex.map(([ex, sol]) => ({ex, sol}))];
+        N[s] = N[s] || {}; const n = N[s][c];
+        if(!n || !n.length) N[s][c] = [sec];
+        else if(!Array.isArray(n[0])) N[s][c] = [["Key points", n], sec];
+        else { const i = n.findIndex(([h]) => /exam tip/i.test(h)); if(i >= 0) n.splice(i, 0, sec); else n.push(sec); }
+      }
+      (d.q || []).forEach(([q, opts, ans, df, why]) => B[s].chapters[c].push({q, opts, ans, diff: DF[df] || "Medium", tag: "NCERT · Textbook based", detailedSolution: {steps: [why], rule: ""}}));
+    }));
+  });
+})();
+
 // ================= CLASS SWITCH (top-level context) =================
 // state.cls ("10" or "12") decides which data every screen uses. It comes from the student's profile
 // (stream "C10" = Class 10; PCM / PCB / PCMB = Class 12) or, in practice mode, from the class picked on Home.
@@ -11663,7 +12907,7 @@ function chapterInfo(s, c, n){
 function ncertChips(s, c){
   const qs = allQuestionsFor(s, c), n = qs.filter(EXAM_FILTERS.ncert).length; if(!n) return "";
   const m = qs.filter(EXAM_FILTERS.ncertMisc).length;
-  return `<div class="ncert-row"><button class="chip" data-c="${esc(c)}" onclick="startExam(state.subject,this.dataset.c,null,'ncert')">📘 NCERT exercises · ${n}</button>${m ? `<button class="chip" data-c="${esc(c)}" onclick="startExam(state.subject,this.dataset.c,null,'ncertMisc')">⭐ Miscellaneous · ${m}</button>` : ""}</div>`;
+  return `<div class="ncert-row"><button class="chip" data-c="${esc(c)}" onclick="startExam(state.subject,this.dataset.c,null,'ncert')">📘 NCERT questions · ${n}</button>${m ? `<button class="chip" data-c="${esc(c)}" onclick="startExam(state.subject,this.dataset.c,null,'ncertMisc')">⭐ Miscellaneous · ${m}</button>` : ""}</div>`;
 }
 function renderChapters(){
   const subj=state.subject, ch=BANK[subj].chapters, col=subjColor(subj), [g1, g2]=subjG(subj), names=Object.keys(ch);
